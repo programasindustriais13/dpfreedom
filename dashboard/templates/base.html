@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Dashboard de atestados médicos para a equipe do Departamento Pessoal com foco total em privacidade de dados.">
+    <title>{% block title %}Departamento Pessoal Dashboard - Atestados{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <img src="{% static 'images/logo.png' %}" alt="Logo Departamento Pessoal" class="brand-logo">
+            <span class="logo-text">Departamento Pessoal</span>
+        </div>
+        {% if user.is_authenticated %}
+        <div class="user-nav">
+            <span class="user-info">
+                Olá, <strong>{{ user.username }}</strong>
+                {% if is_rh_user %}
+                <span class="user-badge"><i class="fa-solid fa-shield-halved"></i> DP Autorizado</span>
+                {% else %}
+                <span class="user-badge" style="background-color:rgba(239,68,68,0.1); color:#fca5a5; border-color:rgba(239,68,68,0.2)"><i class="fa-solid fa-triangle-exclamation"></i> Sem Acesso DP</span>
+                {% endif %}
+            </span>
+            <form action="{% url 'logout' %}" method="post" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary btn-danger btn-small" id="logout-button">
+                    <i class="fa-solid fa-right-from-bracket"></i> Sair
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

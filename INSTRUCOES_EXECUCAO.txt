@@ -1,0 +1,193 @@
+========================================================================
+    INSTRUÇÕES DE EXECUÇÃO — DASHBOARD DE ATESTADOS DEPARTAMENTO PESSOAL
+========================================================================
+
+Este documento apresenta o passo a passo completo para configurar, executar e
+testar o sistema de Dashboard de Atestados Médicos do Departamento Pessoal
+em ambiente Windows, após a transição de identidade de "RH".
+
+------------------------------------------------------------------------
+1. PRÉ-REQUISITOS
+------------------------------------------------------------------------
+* Python 3.9 ou superior instalado.
+* Planilha de referência: 'atestados paulo.xlsx' presente na raiz.
+* Logo do projeto: 'Untitled-2.png' (logo amarela) localizada na raiz.
+
+------------------------------------------------------------------------
+2. ABRINDO O TERMINAL NA PASTA CORRETA
+------------------------------------------------------------------------
+Abra o PowerShell no Windows e navegue até a pasta raiz deste projeto:
+cd "C:\Users\Unicompo\Documents\03_PYTHON1\08 - RH_Grafico"
+
+------------------------------------------------------------------------
+3. CRIANDO E ATIVANDO O AMBIENTE VIRTUAL (MANUALMENTE)
+------------------------------------------------------------------------
+Se você ainda não possui um ambiente virtual configurado nesta pasta, crie-o:
+python -m venv .venv
+
+Para ativar o ambiente virtual no PowerShell do Windows, execute:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\.venv\Scripts\Activate.ps1
+
+Uma vez ativo, o prefixo (.venv) aparecerá no início da linha de comando.
+
+------------------------------------------------------------------------
+4. INSTALANDO AS DEPENDÊNCIAS
+------------------------------------------------------------------------
+Atualize o pip e instale as dependências listadas no requirements.txt:
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+------------------------------------------------------------------------
+5. CONFIGURANDO AS VARIÁVEIS DE AMBIENTE (.env)
+------------------------------------------------------------------------
+Crie o arquivo '.env' na pasta raiz copiando as configurações de '.env.example'
+(caso ainda não tenha feito):
+Copy-Item .env.example .env
+
+Você pode abrir o arquivo '.env' e alterar o valor de SECRET_KEY ou DEBUG
+caso deseje (para desenvolvimento local, o arquivo padrão já é funcional).
+
+------------------------------------------------------------------------
+6. EXECUTANDO AS MIGRATIONS E ESTRUTURA DO BANCO DE DADOS
+------------------------------------------------------------------------
+Gere as migrations do banco de dados (SQLite local) e aplique-as:
+python manage.py makemigrations dashboard
+python manage.py migrate
+
+Uma migração de dados criará e configurará automaticamente o grupo de
+segurança "Departamento Pessoal" com a permissão operacional necessária, 
+migrando usuários vinculados ao grupo antigo "RH" se aplicável.
+
+Note que não serão criadas tabelas para atestados ou CIDs no banco, pois os dados
+são manipulados estritamente em memória durante o processamento.
+
+------------------------------------------------------------------------
+7. CRIANDO O SUPERUSUÁRIO ADMINISTRADOR
+------------------------------------------------------------------------
+Para criar a conta de administrador para gerenciar usuários e permissões:
+python manage.py createsuperuser
+
+Siga as instruções na tela e forneça um nome de usuário, e-mail e senha.
+
+------------------------------------------------------------------------
+8. ARQUIVOS ESTÁTICOS E LOCALIZAÇÃO DA LOGO
+------------------------------------------------------------------------
+O logotipo da empresa foi copiado da raiz para a pasta estática:
+* Origem: 'Untitled-2.png'
+* Destino: 'dashboard/static/images/logo.png'
+
+Para coletar e preparar os arquivos estáticos (caso utilize em ambiente de produção):
+python manage.py collectstatic --noinput
+
+------------------------------------------------------------------------
+9. CRIAÇÃO DO GRUPO E USUÁRIOS OPERACIONAIS
+------------------------------------------------------------------------
+Por segurança e privacidade, administradores (is_superuser ou is_staff) não
+têm acesso automático ao dashboard. Siga os passos abaixo para configurar:
+
+1. Abra o navegador em: http://127.0.0.1:8700/admin/
+2. Faça login com o Superusuário criado no Passo 7.
+3. No painel, vá em Grupos (Groups) e clique em Adicionar (Add).
+4. O grupo "Departamento Pessoal" já deve ter sido criado pela migração. 
+   Caso contrário, crie-o com esse nome exato: Departamento Pessoal
+5. Associe a permissão "dashboard | Can view rh dashboard"
+   (ou codename: view_rh_dashboard) a este grupo. Salve o grupo.
+6. Vá em Usuários (Users) e crie um novo usuário operacional (ex: 'ana_dp').
+7. Edite este novo usuário e associe-o ao grupo 'Departamento Pessoal'. Salve.
+8. (Opcional) Crie outro usuário comum sem o grupo para testar o bloqueio.
+
+------------------------------------------------------------------------
+10. ESTRUTURA DA PLANILHA E NOVA COLUNA INSS
+------------------------------------------------------------------------
+O sistema aceita planilhas no formato .xlsx contendo 5 ou 6 colunas. A estrutura esperada é:
+1. **Nome do colaborador** (Obrigatória)
+2. **Função do colaborador** (Opcional - se vazia, classificada como "Não informada")
+3. **Data inicial do atestado** (Obrigatória - formato DD/MM/AAAA ou AAAA-MM-DD)
+4. **CID** (Opcional - exibida apenas agregada nos gráficos)
+5. **Quantidade de dias/ HORAS** (Obrigatória - ex: "2 dias", "4 horas", "8h", "08:00")
+6. **Houve Afastamento Pelo INSS?** (Opcional - coluna nova)
+
+### Valores aceitos para o INSS:
+* **Como SIM**: "SIM", "Sim", "sim", "s" (e variações com espaços extras).
+* **Como NÃO**: "NÃO", "Não", "não", "NAO", "Nao", "nao", "n" (e variações com espaços extras).
+* **Como NÃO INFORMADO**: Células em branco ou vazias.
+* **Valores inválidos**: Valores como "talvez" ou "não sei" serão apresentados na área de "Inconsistências Detectadas" na qualidade dos dados, mas a linha continuará sendo processada normalmente, sendo classificada como "NÃO INFORMADO" no painel.
+
+### Compatibilidade com Planilhas Antigas:
+Se a planilha não contiver a coluna do INSS, o sistema processará normalmente as 5 colunas existentes. Apresentará um aviso informando que a coluna do INSS não está disponível, exibirá "Não disponível" no indicador do INSS e ocultará o filtro e o gráfico correspondente, sem quebras no processamento.
+
+------------------------------------------------------------------------
+11. CARD INTELIGENTE DE TEMPO DE AFASTAMENTO
+------------------------------------------------------------------------
+Os dois cards e gráficos separados de dias e horas de afastamento por colaborador 
+foram substituídos por um único Card Inteligente.
+
+* **Sem conversão arbitrária**: O sistema nunca converte horas em dias ou vice-versa (não assume jornadas de 8h = 1 dia).
+* **Modos de visualização**:
+  1. *Combinado*: Exibe total de dias e de horas na mesma linha (ex: "Carlos Almeida — 2 dias e 4 horas") com duas barras de progresso horizontais usando escalas e normalizações independentes para dias (amarelo) e horas (azul).
+  2. *Dias*: Exibe apenas totais em dias, ocultando quem tem zero dias.
+  3. *Horas*: Exibe apenas totais em horas, ocultando quem tem zero horas.
+* **Ordenação**: Dropdown permite ordenar de forma explícita por: "Mais atestados", "Mais dias", "Mais horas" ou "Ordem alfabética".
+
+------------------------------------------------------------------------
+12. INICIANDO O SERVIDOR LOCAL
+------------------------------------------------------------------------
+Inicie o servidor de desenvolvimento do Django:
+python manage.py runserver 0.0.0.0:8700
+
+O servidor estará rodando em: http://127.0.0.1:8700/
+
+------------------------------------------------------------------------
+13. TESTANDO MANUALMENTE O FLUXO DO SISTEMA
+------------------------------------------------------------------------
+1. Acesse http://127.0.0.1:8700/ e entre com o usuário comum (sem grupo).
+   Você será redirecionado para a tela de Acesso Negado (403) com a identidade do Departamento Pessoal.
+2. Clique em "Alternar Usuário" e faça login com o usuário do Departamento Pessoal (ex: 'ana_dp').
+3. Você será direcionado para o Dashboard Principal do Departamento Pessoal.
+4. Anexe a planilha de testes antiga (apenas 5 colunas). Veja que o aviso de ausência da coluna do INSS é exibido, o indicador mostra "Não disponível", e o filtro/gráfico correspondente ficam desabilitados ou ocultos.
+5. Faça o upload de uma planilha com 6 colunas, contendo valores Sim, Não, vazios e inválidos na coluna do INSS.
+6. Confira a contagem de afastados e o percentual calculated (apenas sobre Sim + Não).
+7. Teste o filtro interativo por INSS ("Sim", "Não", "Não informado", "Todos"). Verifique que todos os cartões, a tabela consolidada e os gráficos são atualizados em tempo real.
+8. No card de tempo de afastamento, identifique colaboradores com lançamentos híbridos e valide a exibição (ex: "2 dias e 4 horas"). Alterne entre os modos "Combinado", "Dias" e "Horas" e mude a ordenação.
+9. Na tabela de resumo por colaborador, verifique as novas colunas de quantidade com afastamento INSS, sem afastamento, e sem informação.
+10. Atualize a página (F5) e confirme que todos os dados somem da tela. Os dados não foram persistidos em local algum (banco, disco ou sessão).
+11. Faça o logout clicando em "Sair".
+
+------------------------------------------------------------------------
+14. EXECUTANDO OS TESTES AUTOMATIZADOS
+------------------------------------------------------------------------
+Para rodar a verificação de sanidade do sistema Django:
+python manage.py check
+
+Para executar todos os testes automatizados unitários, de permissões e parser:
+python manage.py test dashboard
+
+------------------------------------------------------------------------
+15. CONFIRMAÇÃO DE PRIVACIDADE E SEGURANÇA
+------------------------------------------------------------------------
+* Pasta 'media': Não é criada no projeto.
+* Banco de Dados: O banco 'db.sqlite3' não armazena registros de atestados ou CIDs.
+* Logs do Sistema: Nenhuma informação pessoal de saúde, nome ou CID é impressa em stdout ou gravada em arquivos de log.
+* Controle de Cache: As views retornam 'Cache-Control: no-store, private' para evitar que o navegador armazene cópias locais temporárias dos dados de saúde.
+
+------------------------------------------------------------------------
+COMANDOS GIT PARA O PROPRIETÁRIO EXECUTAR MANUALMENTE
+------------------------------------------------------------------------
+Nenhum comando Git foi executado pelo agente.
+
+Caso deseje versionar as alterações deste projeto no repositório local,
+utilize os seguintes comandos no terminal:
+
+1. Verificar os arquivos criados e alterados:
+   git status
+
+2. Analisar as diferenças pontuais nas configurações:
+   git diff
+
+3. Adicionar as alterações na staging area:
+   git add .
+
+4. Criar o commit registrando a funcionalidade:
+   git commit -m "feat: implementar melhorias dp inss card tempo e identidade visual"
+========================================================================

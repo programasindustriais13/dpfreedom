@@ -1,0 +1,1203 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Painel do Departamento Pessoal - Atestados{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'js/chart.min.js' %}"></script>
+<style>
+    /* Additional inline styles for dashboard interactivity */
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    .filter-group select, .filter-group input {
+        background-color: var(--bg-main);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        font-family: var(--font-sans);
+        font-size: 0.85rem;
+    }
+    .filter-group select:focus, .filter-group input:focus {
+        outline: none;
+        border-color: var(--color-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h1 style="font-size: 1.75rem; font-weight: 700; display: flex; align-items: center; gap: 0.75rem;">
+            <i class="fa-solid fa-chart-pie" style="color: var(--color-primary);"></i> Painel do Departamento Pessoal — Atestados Médicos
+        </h1>
+        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+            Análise e monitoramento temporário de afastamentos.
+        </p>
+    </div>
+    <div>
+        <span class="privacy-badge">
+            <i class="fa-solid fa-user-shield"></i> Privacidade por Design: Dados em Memória
+        </span>
+    </div>
+</div>
+
+{% if not parsed_data %}
+<!-- UPLOAD STATE -->
+<div class="card" style="max-width: 800px; margin: 2rem auto;">
+    <div class="card-title" style="margin-bottom: 1.5rem;">
+        <span><i class="fa-solid fa-file-import"></i> Importar Planilha de Atestados</span>
+    </div>
+
+    {% if error_msg %}
+    <div class="error-list">
+        <i class="fa-solid fa-triangle-exclamation"></i> {{ error_msg }}
+    </div>
+    {% endif %}
+
+    <div class="alert-info-box">
+        <i class="fa-solid fa-circle-info"></i> <strong>Como funciona a privacidade:</strong><br>
+        O arquivo carregado será processado exclusivamente em memória. Nenhuma informação de colaborador, CID, função ou data de afastamento será salva no banco de dados, gravada em disco ou armazenada na sessão do servidor. Ao sair desta página ou atualizar o navegador, todos os dados serão limpos.
+    </div>
+
+    <form method="post" enctype="multipart/form-data" id="upload-form">
+        {% csrf_token %}
+        <div class="form-group" style="margin-bottom: 2rem;">
+            <label class="form-label">Arquivo Excel (.xlsx)</label>
+            <div class="upload-area" onclick="document.getElementById('id_excel_file').click();">
+                <div class="upload-icon">
+                    <i class="fa-regular fa-file-excel"></i>
+                </div>
+                <div class="upload-text" id="upload-filename">Clique aqui para selecionar a planilha</div>
+                <div class="upload-subtext">Apenas formato .xlsx. Tamanho máximo: 5 MB. Limite de 1000 linhas.</div>
+                <input type="file" name="excel_file" id="id_excel_file" style="display: none;" accept=".xlsx" required onchange="updateFileName(this)">
+            </div>
+            {% if form.excel_file.errors %}
+            <div class="error-list" style="margin-top: 0.5rem; margin-bottom: 0;">
+                {{ form.excel_file.errors }}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="form-group" style="margin-bottom: 2rem;">
+            <label for="id_default_unit_behavior" class="form-label">{{ form.default_unit_behavior.label }}</label>
+            <select name="default_unit_behavior" id="id_default_unit_behavior" class="form-control">
+                {% for value, label in form.fields.default_unit_behavior.choices %}
+                <option value="{{ value }}" {% if form.fields.default_unit_behavior.initial == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem;">
+                {{ form.default_unit_behavior.help_text }}
+            </p>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
+            <button type="submit" class="btn btn-primary" id="btn-process-excel">
+                <i class="fa-solid fa-circle-play"></i> Processar e Visualizar Dashboard
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="max-width: 800px; margin: 2rem auto;">
+    <div class="card-title">
+        <span><i class="fa-solid fa-list-check"></i> Colunas esperadas na planilha</span>
+    </div>
+    <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+        O sistema normaliza os cabeçalhos das colunas automaticamente, ignorando acentos, espaços extras e maiúsculas. A planilha pode conter as seguintes colunas de dados:
+    </p>
+    <table style="font-size: 0.85rem;">
+        <thead>
+            <tr>
+                <th>Coluna</th>
+                <th>Finalidade</th>
+                <th>Regras</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Nome do colaborador</strong></td>
+                <td>Identificar o funcionário</td>
+                <td>Obrigatório. Espaços duplicados são removidos no processamento.</td>
+            </tr>
+            <tr>
+                <td><strong>Função do colaborador</strong></td>
+                <td>Classificar por cargo/setor</td>
+                <td>Opcional. Se vazio, é classificado como "Não informada".</td>
+            </tr>
+            <tr>
+                <td><strong>Data inicial do atestado</strong></td>
+                <td>Registrar o dia de início</td>
+                <td>Obrigatório. Deve conter data válida ou formato legível.</td>
+            </tr>
+            <tr>
+                <td><strong>CID</strong></td>
+                <td>Identificar CID da CID-10</td>
+                <td>Opcional. Apresentado apenas de forma agregada no gráfico (não associado ao nome na tabela).</td>
+            </tr>
+            <tr>
+                <td><strong>Quantidade de dias/ HORAS</strong></td>
+                <td>Período de afastamento</td>
+                <td>Obrigatório. Exemplos válidos: "2 dias", "4 horas", "8h", "08:00". Números puros dependem da configuração selecionada acima.</td>
+            </tr>
+            <tr>
+                <td><strong>Houve Afastamento Pelo INSS?</strong></td>
+                <td>Identificar encaminhamento ao INSS</td>
+                <td>Opcional. Se ausente, os indicadores correspondentes são omitidos/desabilitados. Valores válidos: Sim ou Não.</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    function updateFileName(input) {
+        const name = input.files[0] ? input.files[0].name : "Clique aqui para selecionar a planilha";
+        document.getElementById('upload-filename').innerText = name;
+    }
+</script>
+
+{% else %}
+<!-- DASHBOARD VIEW STATE -->
+{% if not parsed_data.inss_available %}
+<!-- INSS missing warning banner -->
+<div class="alert-info-box" style="background-color: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); color: #fca5a5;">
+    <i class="fa-solid fa-triangle-exclamation"></i> A coluna <strong>“Houve Afastamento Pelo INSS?”</strong> não foi encontrada. Os indicadores de INSS não estão disponíveis para este arquivo.
+</div>
+{% endif %}
+
+<!-- Summary info banner -->
+<div class="alert-info-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <i class="fa-solid fa-file-circle-check"></i> Planilha processada: <strong>Aba "{{ parsed_data.sheet_name }}"</strong>
+        ({{ parsed_data.total_rows }} linhas lidas, das quais {{ parsed_data.valid_count }} são válidas).
+    </div>
+    <div>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary btn-small">
+            <i class="fa-solid fa-upload"></i> Importar Outra Planilha
+        </a>
+    </div>
+</div>
+
+<!-- Indicator Cards -->
+<div class="dashboard-grid">
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Atestados Válidos</span>
+        <div class="indicator-value primary" id="indicator-valid-count">{{ parsed_data.indicators.total_valid }}</div>
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Colaboradores</span>
+        <div class="indicator-value success" id="indicator-colab-count">{{ parsed_data.indicators.colab_count }}</div>
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Total de Dias</span>
+        <div class="indicator-value warning" id="indicator-total-dias">{{ parsed_data.indicators.total_dias|floatformat:1 }}</div>
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Total de Horas</span>
+        <div class="indicator-value warning" id="indicator-total-horas">{{ parsed_data.indicators.total_horas|floatformat:1 }}</div>
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;" title="Percentual calculado desconsiderando registros 'Não informado' no denominador.">
+            Afastamento INSS <i class="fa-solid fa-circle-info" style="cursor:help; font-size: 0.8rem; color: var(--text-secondary);"></i>
+        </span>
+        {% if parsed_data.inss_available %}
+        <div class="indicator-value primary" id="indicator-inss-percentage" style="font-size: 1.4rem; margin-top: 0.25rem;">
+            {{ parsed_data.indicators.inss_sim_count }} atestados
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;" id="indicator-inss-sub">
+            {{ parsed_data.indicators.inss_percentage_sim|floatformat:1 }}% dos informados
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem; display: flex; justify-content: space-between;" id="indicator-inss-breakdown">
+            <span>Sim: {{ parsed_data.indicators.inss_sim_count }}</span>
+            <span>Não: {{ parsed_data.indicators.inss_nao_count }}</span>
+            <span>N/I: {{ parsed_data.indicators.inss_nao_informado_count }}</span>
+        </div>
+        {% else %}
+        <div class="indicator-value primary" id="indicator-inss-percentage" style="font-size: 1.4rem; margin-top: 0.25rem; color: var(--text-secondary);">
+            Não disponível
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;" id="indicator-inss-sub">
+            N/A
+        </div>
+        {% endif %}
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Inconsistências</span>
+        <div class="indicator-value danger" id="indicator-invalid-count">{{ parsed_data.indicators.total_invalid }}</div>
+    </div>
+    <div class="card indicator-card">
+        <span class="form-label" style="margin-bottom: 0;">Possíveis Duplicados</span>
+        <div class="indicator-value danger" id="indicator-duplicates-count">{{ parsed_data.indicators.total_duplicates }}</div>
+    </div>
+</div>
+
+<!-- Filters Panel -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-title" style="margin-bottom: 0.75rem; font-size: 0.95rem;">
+        <span><i class="fa-solid fa-filter"></i> Filtros Interativos</span>
+        <button onclick="clearFilters()" class="btn btn-secondary btn-small" id="clear-filters-btn">Limpar Filtros</button>
+    </div>
+    <div class="filters-wrapper">
+        <div class="filter-item filter-group">
+            <label class="form-label">Data Inicial</label>
+            <input type="date" id="filter-date-start" onchange="applyFilters()">
+        </div>
+        <div class="filter-item filter-group">
+            <label class="form-label">Data Final</label>
+            <input type="date" id="filter-date-end" onchange="applyFilters()">
+        </div>
+        <div class="filter-item filter-group">
+            <label class="form-label">Colaborador</label>
+            <select id="filter-colaborador" onchange="applyFilters()">
+                <option value="">Todos</option>
+            </select>
+        </div>
+        <div class="filter-item filter-group">
+            <label class="form-label">Função</label>
+            <select id="filter-funcao" onchange="applyFilters()">
+                <option value="">Todas</option>
+            </select>
+        </div>
+        <div class="filter-item filter-group">
+            <label class="form-label">CID (Agregado)</label>
+            <select id="filter-cid" onchange="applyFilters()">
+                <option value="">Todos</option>
+            </select>
+        </div>
+        <!-- INSS Filter -->
+        <div class="filter-item filter-group" id="filter-inss-group" {% if not parsed_data.inss_available %}style="opacity: 0.5;"{% endif %}>
+            <label class="form-label">Afastamento pelo INSS</label>
+            <select id="filter-inss" onchange="applyFilters()" {% if not parsed_data.inss_available %}disabled{% endif %}>
+                <option value="">Todos</option>
+                {% if parsed_data.inss_available %}
+                <option value="SIM">Sim</option>
+                <option value="NÃO">Não</option>
+                <option value="NÃO INFORMADO">Não informado</option>
+                {% else %}
+                <option value="" disabled>Não disponível</option>
+                {% endif %}
+            </select>
+        </div>
+    </div>
+    <div style="font-size: 0.8rem; color: var(--text-secondary);" id="filter-period-display">
+        Período original do arquivo: {{ parsed_data.indicators.periodo }}
+    </div>
+</div>
+
+<!-- Charts Grid -->
+<div class="charts-grid">
+    <div class="card">
+        <div class="card-title">1. Atestados por Colaborador</div>
+        <div class="chart-container">
+            <canvas id="chart-colab-atestados"></canvas>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">2. Evolução Temporal dos Atestados</div>
+        <div class="chart-container">
+            <canvas id="chart-temporal"></canvas>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">3. Atestados por Função</div>
+        <div class="chart-container">
+            <canvas id="chart-funcao"></canvas>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">4. Distribuição Agregada por CID</div>
+        <div class="chart-container">
+            <canvas id="chart-cid"></canvas>
+        </div>
+    </div>
+    
+    <!-- CARD INTELIGENTE DE TEMPO DE AFASTAMENTO (Spans 2 columns) -->
+    <div class="card" style="grid-column: span 2;">
+        <div class="card-title">
+            <span><i class="fa-solid fa-hourglass-half"></i> Tempo de Afastamento por Colaborador</span>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-small active" onclick="setAbsenceMode('combined')" id="btn-mode-combined">Combinado</button>
+                    <button class="btn btn-secondary btn-small" onclick="setAbsenceMode('days')" id="btn-mode-days">Dias</button>
+                    <button class="btn btn-secondary btn-small" onclick="setAbsenceMode('hours')" id="btn-mode-hours">Horas</button>
+                </div>
+                <select id="absence-sort" onchange="changeAbsenceSort()" class="form-control" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.8rem; height: auto;">
+                    <option value="atestados">Mais atestados</option>
+                    <option value="dias">Mais dias</option>
+                    <option value="horas">Mais horas</option>
+                    <option value="nome">Ordem alfabética</option>
+                </select>
+            </div>
+        </div>
+        <div id="absence-time-list" style="max-height: 400px; overflow-y: auto; padding-right: 0.5rem;">
+            <!-- Injected via JavaScript -->
+        </div>
+        <div style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-secondary); justify-content: flex-end;">
+            <span style="display: flex; align-items: center; gap: 0.25rem;"><span style="width: 12px; height: 12px; background-color: var(--color-primary); display: inline-block; border-radius: 2px;"></span> Dias de afastamento</span>
+            <span style="display: flex; align-items: center; gap: 0.25rem;"><span style="width: 12px; height: 12px; background-color: #3b82f6; display: inline-block; border-radius: 2px;"></span> Horas de afastamento</span>
+        </div>
+    </div>
+
+    <!-- INSS Chart -->
+    {% if parsed_data.inss_available %}
+    <div class="card" id="card-chart-inss" style="grid-column: span 2;">
+        <div class="card-title">5. Distribuição dos Afastamentos pelo INSS</div>
+        <div class="chart-container" style="height: 250px;">
+            <canvas id="chart-inss"></canvas>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Summary Table -->
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-title">
+        <span><i class="fa-solid fa-table"></i> Resumo Consolidado de Colaboradores</span>
+    </div>
+    
+    <div class="table-controls">
+        <div class="search-input-wrapper">
+            <input type="text" id="table-search" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.85rem;" placeholder="Buscar colaborador..." oninput="handleSearch()">
+        </div>
+        <div class="pagination-controls">
+            <span>Visualizando</span>
+            <select id="table-page-size" class="form-control" style="width: auto; display: inline-block; padding: 0.25rem 0.5rem; font-size: 0.8rem;" onchange="changePageSize()">
+                <option value="5">5</option>
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+            </select>
+            <span>linhas por página</span>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th style="cursor:pointer;" onclick="setSort('colaborador')">Colaborador <i class="fa-solid fa-sort" id="sort-icon-colaborador"></i></th>
+                    <th style="cursor:pointer; text-align:center;" onclick="setSort('atestados_count')">Atestados <i class="fa-solid fa-sort" id="sort-icon-atestados_count"></i></th>
+                    <th style="cursor:pointer; text-align:center;" onclick="setSort('total_dias')">Total Dias <i class="fa-solid fa-sort" id="sort-icon-total_dias"></i></th>
+                    <th style="cursor:pointer; text-align:center;" onclick="setSort('total_horas')">Total Horas <i class="fa-solid fa-sort" id="sort-icon-total_horas"></i></th>
+                    {% if parsed_data.inss_available %}
+                    <th style="text-align:center;">INSS (Sim)</th>
+                    <th style="text-align:center;">INSS (Não)</th>
+                    <th style="text-align:center;">INSS (N/I)</th>
+                    {% endif %}
+                    <th style="text-align:center;">Primeira Data</th>
+                    <th style="text-align:center;">Última Data</th>
+                </tr>
+            </thead>
+            <tbody id="summary-table-body">
+                <!-- Injected via JavaScript -->
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; flex-wrap: wrap; gap: 1rem;">
+        <div style="font-size: 0.85rem; color: var(--text-secondary);" id="table-info">
+            Mostrando 0-0 de 0 colaboradores.
+        </div>
+        <div class="pagination-controls" id="table-pagination">
+            <!-- Buttons injected via JavaScript -->
+        </div>
+    </div>
+</div>
+
+<!-- Quality Checks Panel -->
+<div class="quality-grid">
+    <div class="card">
+        <div class="card-title" style="color: #fca5a5;">
+            <span><i class="fa-solid fa-triangle-exclamation"></i> Inconsistências Detectadas ({{ parsed_data.inconsistencies|length }})</span>
+        </div>
+        {% if parsed_data.inconsistencies %}
+        <ul class="quality-list">
+            {% for item in parsed_data.inconsistencies %}
+            <li>
+                <span><strong>Linha {{ item.linha }}:</strong> {{ item.erro }}</span>
+                <span class="danger" style="font-size: 0.8rem;">{{ item.detalhe }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="font-size: 0.875rem; color: var(--text-secondary);">
+            Nenhuma inconsistência encontrada. Todas as linhas da planilha foram importadas com sucesso!
+        </p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-title" style="color: #fde047;">
+            <span><i class="fa-solid fa-clone"></i> Alertas de Possível Duplicidade ({{ parsed_data.duplicates_list|length }})</span>
+        </div>
+        {% if parsed_data.duplicates_list %}
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+            Linhas com a mesma combinação de colaborador, data, CID, quantidade e unidade. Não foram removidas automaticamente.
+        </p>
+        <ul class="quality-list">
+            {% for item in parsed_data.duplicates_list %}
+            <li>
+                <span><strong>Linha {{ item.linha }}:</strong> {{ item.colaborador }} ({{ item.data }})</span>
+                <span class="warning" style="font-size: 0.8rem;">{{ item.cid }} - {{ item.afastamento }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p style="font-size: 0.875rem; color: var(--text-secondary);">
+            Nenhuma linha duplicada foi sinalizada.
+        </p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Inject the parsed raw records securely in standard JSON -->
+{{ parsed_data.raw_valid_records|json_script:"raw-records-data" }}
+
+<script>
+    // Global references
+    const rawRecords = JSON.parse(document.getElementById('raw-records-data').textContent);
+    const inssAvailable = {{ parsed_data.inss_available|yesno:"true,false" }};
+
+    // UI charts objects
+    let chartColabAtestadosObj = null;
+    let chartTemporalObj = null;
+    let chartFuncaoObj = null;
+    let chartCidObj = null;
+    let chartInssObj = null;
+
+    // Table pagination, search and sort state
+    let tableSearchQuery = "";
+    let tableCurrentPage = 1;
+    let tablePageSize = 10;
+    let tableSortField = "colaborador";
+    let tableSortAsc = true;
+    let tableData = []; // Aggregated from filtered records
+
+    // Absence card states
+    let absenceMode = 'combined'; // 'combined', 'days', 'hours'
+    let absenceSort = 'atestados'; // 'atestados', 'dias', 'horas', 'nome'
+    let currentFilteredRecords = [];
+
+    // Setup initial select filter choices based on parsed data
+    function setupFilterChoices() {
+        const colaboradores = new Set();
+        const funcoes = new Set();
+        const cids = new Set();
+
+        rawRecords.forEach(r => {
+            if (r.colaborador) colaboradores.add(r.colaborador);
+            if (r.funcao) funcoes.add(r.funcao);
+            if (r.cid) cids.add(r.cid);
+        });
+
+        // Populate Colaborador dropdown
+        const selectColab = document.getElementById('filter-colaborador');
+        Array.from(colaboradores).sort().forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.innerText = c;
+            selectColab.appendChild(opt);
+        });
+
+        // Populate Funcao dropdown
+        const selectFuncao = document.getElementById('filter-funcao');
+        Array.from(funcoes).sort().forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.innerText = f;
+            selectFuncao.appendChild(opt);
+        });
+
+        // Populate CID dropdown
+        const selectCid = document.getElementById('filter-cid');
+        Array.from(cids).sort().forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.innerText = c;
+            selectCid.appendChild(opt);
+        });
+    }
+
+    // Portuguese short month dictionary and sort key
+    const monthMapping = {
+        "01": "Jan", "02": "Fev", "03": "Mar", "04": "Abr", "05": "Mai", "06": "Jun",
+        "07": "Jul", "08": "Ago", "09": "Set", "10": "Out", "11": "Nov", "12": "Dez"
+    };
+
+    function formatDateToDMY(dateStr) {
+        if (!dateStr) return "";
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+        return dateStr;
+    }
+
+    // Apply interactive filtering
+    function applyFilters() {
+        const filterStart = document.getElementById('filter-date-start').value;
+        const filterEnd = document.getElementById('filter-date-end').value;
+        const filterColab = document.getElementById('filter-colaborador').value;
+        const filterFuncao = document.getElementById('filter-funcao').value;
+        const filterCid = document.getElementById('filter-cid').value;
+        
+        const filterInssEl = document.getElementById('filter-inss');
+        const filterInss = filterInssEl ? filterInssEl.value : "";
+
+        // Filter the raw records list
+        const filtered = rawRecords.filter(r => {
+            if (filterStart && r.data < filterStart) return false;
+            if (filterEnd && r.data > filterEnd) return false;
+            if (filterColab && r.colaborador !== filterColab) return false;
+            if (filterFuncao && r.funcao !== filterFuncao) return false;
+            if (filterCid && r.cid !== filterCid) return false;
+            if (filterInss && r.inss !== filterInss) return false;
+            return true;
+        });
+
+        // Save reference for card
+        currentFilteredRecords = filtered;
+
+        // Update indicators
+        updateIndicators(filtered);
+
+        // Update charts
+        updateCharts(filtered);
+
+        // Render combined time card
+        renderAbsenceTimeList();
+
+        // Aggregate table data and re-render
+        aggregateTableData(filtered);
+        renderTable();
+    }
+
+    function clearFilters() {
+        document.getElementById('filter-date-start').value = "";
+        document.getElementById('filter-date-end').value = "";
+        document.getElementById('filter-colaborador').value = "";
+        document.getElementById('filter-funcao').value = "";
+        document.getElementById('filter-cid').value = "";
+        
+        const filterInssEl = document.getElementById('filter-inss');
+        if (filterInssEl) filterInssEl.value = "";
+        
+        applyFilters();
+    }
+
+    function updateIndicators(filtered) {
+        const totalValid = filtered.length;
+        const colabs = new Set(filtered.map(r => r.colaborador));
+        const colabCount = colabs.size;
+
+        let totalDias = 0;
+        let totalHoras = 0;
+        let inssSim = 0;
+        let inssNao = 0;
+        let inssNaoInformado = 0;
+
+        filtered.forEach(r => {
+            if (r.unidade === 'days') totalDias += r.quantidade;
+            else if (r.unidade === 'hours') totalHoras += r.quantidade;
+
+            if (r.inss === 'SIM') inssSim++;
+            else if (r.inss === 'NÃO') inssNao++;
+            else inssNaoInformado++;
+        });
+
+        document.getElementById('indicator-valid-count').innerText = totalValid;
+        document.getElementById('indicator-colab-count').innerText = colabCount;
+        document.getElementById('indicator-total-dias').innerText = totalDias.toFixed(1);
+        document.getElementById('indicator-total-horas').innerText = totalHoras.toFixed(1);
+
+        if (inssAvailable) {
+            document.getElementById('indicator-inss-percentage').innerText = `${inssSim} atestado${inssSim === 1 ? '' : 's'}`;
+            
+            const denom = inssSim + inssNao;
+            const pct = denom > 0 ? (inssSim / denom) * 100 : 0;
+            document.getElementById('indicator-inss-sub').innerText = `${pct.toFixed(1)}% dos informados`;
+            
+            const breakdown = document.getElementById('indicator-inss-breakdown');
+            if (breakdown) {
+                breakdown.innerHTML = `
+                    <span>Sim: ${inssSim}</span>
+                    <span>Não: ${inssNao}</span>
+                    <span>N/I: ${inssNaoInformado}</span>
+                `;
+            }
+        }
+
+        // Update date range display
+        if (filtered.length > 0) {
+            const sortedDates = filtered.map(r => r.data).sort();
+            const minD = formatDateToDMY(sortedDates[0]);
+            const maxD = formatDateToDMY(sortedDates[sortedDates.length - 1]);
+            document.getElementById('filter-period-display').innerHTML = `Período nos dados filtrados: <strong>${minD} até ${maxD}</strong>`;
+        } else {
+            document.getElementById('filter-period-display').innerText = "Período nos dados filtrados: N/A";
+        }
+    }
+
+    // Chart aggregations and updates
+    function updateCharts(filtered) {
+        // --- 1. Atestados por Colaborador ---
+        const cAtestados = {};
+        // --- 2. Temporal (meses) ---
+        const cTemporal = {};
+        // --- 3. Função ---
+        const cFuncao = {};
+        // --- 4. CID ---
+        const cCid = {};
+
+        filtered.forEach(r => {
+            const colab = r.colaborador;
+            cAtestados[colab] = (cAtestados[colab] || 0) + 1;
+
+            const monthKey = r.data.substring(0, 7); // "2026-07"
+            cTemporal[monthKey] = (cTemporal[monthKey] || 0) + 1;
+
+            cFuncao[r.funcao] = (cFuncao[r.funcao] || 0) + 1;
+            cCid[r.cid] = (cCid[r.cid] || 0) + 1;
+        });
+
+        // Update Chart 1: Colab Atestados (Horizontal Bar)
+        const c1Labels = Object.keys(cAtestados).sort((a, b) => cAtestados[b] - cAtestados[a]);
+        const c1Data = c1Labels.map(l => cAtestados[l]);
+        chartColabAtestadosObj.data.labels = c1Labels;
+        chartColabAtestadosObj.data.datasets[0].data = c1Data;
+        chartColabAtestadosObj.update();
+
+        // Update Chart 2: Temporal (Line)
+        const c2KeysSorted = Object.keys(cTemporal).sort();
+        const c2Labels = c2KeysSorted.map(k => {
+            const [y, m] = k.split('-');
+            return `${monthMapping[m] || m}/${y}`;
+        });
+        const c2Data = c2KeysSorted.map(k => cTemporal[k]);
+        chartTemporalObj.data.labels = c2Labels;
+        chartTemporalObj.data.datasets[0].data = c2Data;
+        chartTemporalObj.update();
+
+        // Update Chart 3: Função (Vertical Bar)
+        const c3Labels = Object.keys(cFuncao).sort((a, b) => cFuncao[b] - cFuncao[a]);
+        const c3Data = c3Labels.map(l => cFuncao[l]);
+        chartFuncaoObj.data.labels = c3Labels;
+        chartFuncaoObj.data.datasets[0].data = c3Data;
+        chartFuncaoObj.update();
+
+        // Update Chart 4: CID (Doughnut with other aggregation)
+        const c6SortedKeys = Object.keys(cCid).sort((a, b) => cCid[b] - cCid[a]);
+        let c6Labels = [];
+        let c6Data = [];
+        if (c6SortedKeys.length <= 8) {
+            c6Labels = c6SortedKeys;
+            c6Data = c6SortedKeys.map(k => cCid[k]);
+        } else {
+            c6Labels = c6SortedKeys.slice(0, 7);
+            c6Data = c6Labels.map(k => cCid[k]);
+            const othersSum = c6SortedKeys.slice(7).reduce((acc, k) => acc + cCid[k], 0);
+            c6Labels.push("Outros");
+            c6Data.push(othersSum);
+        }
+        chartCidObj.data.labels = c6Labels;
+        chartCidObj.data.datasets[0].data = c6Data;
+        chartCidObj.update();
+
+        // Update Chart 5: INSS (Horizontal Bar)
+        if (inssAvailable && chartInssObj) {
+            let inssSim = 0;
+            let inssNao = 0;
+            let inssNaoInformado = 0;
+            filtered.forEach(r => {
+                if (r.inss === 'SIM') inssSim++;
+                else if (r.inss === 'NÃO') inssNao++;
+                else inssNaoInformado++;
+            });
+            chartInssObj.data.datasets[0].data = [inssSim, inssNao, inssNaoInformado];
+            chartInssObj.update();
+        }
+    }
+
+    // Card Inteligente logic
+    function setAbsenceMode(mode) {
+        absenceMode = mode;
+        
+        document.getElementById('btn-mode-combined').classList.remove('active');
+        document.getElementById('btn-mode-days').classList.remove('active');
+        document.getElementById('btn-mode-hours').classList.remove('active');
+        
+        if (mode === 'combined') document.getElementById('btn-mode-combined').classList.add('active');
+        else if (mode === 'days') document.getElementById('btn-mode-days').classList.add('active');
+        else if (mode === 'hours') document.getElementById('btn-mode-hours').classList.add('active');
+        
+        renderAbsenceTimeList();
+    }
+
+    function changeAbsenceSort() {
+        absenceSort = document.getElementById('absence-sort').value;
+        renderAbsenceTimeList();
+    }
+
+    function renderAbsenceTimeList() {
+        const listContainer = document.getElementById('absence-time-list');
+        listContainer.innerHTML = "";
+
+        const collabs = {};
+        currentFilteredRecords.forEach(r => {
+            const name = r.colaborador;
+            if (!collabs[name]) {
+                collabs[name] = { name: name, days: 0, hours: 0, count: 0 };
+            }
+            collabs[name].count++;
+            if (r.unidade === 'days') collabs[name].days += r.quantidade;
+            else if (r.unidade === 'hours') collabs[name].hours += r.quantidade;
+        });
+
+        let listData = Object.values(collabs);
+
+        if (absenceMode === 'days') {
+            listData = listData.filter(c => c.days > 0);
+        } else if (absenceMode === 'hours') {
+            listData = listData.filter(c => c.hours > 0);
+        } else {
+            listData = listData.filter(c => c.days > 0 || c.hours > 0);
+        }
+
+        if (listData.length === 0) {
+            listContainer.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 2rem; font-size: 0.9rem;">Nenhum registro de afastamento encontrado para os filtros atuais.</div>`;
+            return;
+        }
+
+        // Sort data
+        listData.sort((a, b) => {
+            if (absenceMode === 'days') {
+                return b.days - a.days || a.name.localeCompare(b.name);
+            } else if (absenceMode === 'hours') {
+                return b.hours - a.hours || a.name.localeCompare(b.name);
+            } else {
+                if (absenceSort === 'atestados') {
+                    return b.count - a.count || b.days - a.days || b.hours - a.hours || a.name.localeCompare(b.name);
+                } else if (absenceSort === 'dias') {
+                    return b.days - a.days || b.hours - a.hours || a.name.localeCompare(b.name);
+                } else if (absenceSort === 'horas') {
+                    return b.hours - a.hours || b.days - a.days || a.name.localeCompare(b.name);
+                } else if (absenceSort === 'nome') {
+                    return a.name.localeCompare(b.name);
+                }
+            }
+        });
+
+        // Compute max for scales
+        const maxDays = Math.max(...listData.map(c => c.days), 1);
+        const maxHours = Math.max(...listData.map(c => c.hours), 1);
+
+        listData.forEach(c => {
+            const row = document.createElement('div');
+            row.className = "absence-row";
+
+            let text = "";
+            if (c.days > 0 && c.hours > 0) {
+                const dLabel = c.days === 1 ? "1 dia" : `${c.days.toFixed(1)} dias`;
+                const hLabel = c.hours === 1 ? "1 hora" : `${c.hours.toFixed(1)} horas`;
+                text = `${dLabel} e ${hLabel}`;
+            } else if (c.days > 0) {
+                text = c.days === 1 ? "1 dia" : `${c.days.toFixed(1)} dias`;
+            } else if (c.hours > 0) {
+                text = c.hours === 1 ? "1 hora" : `${c.hours.toFixed(1)} horas`;
+            }
+
+            const pctDays = (c.days / maxDays) * 100;
+            const pctHours = (c.hours / maxHours) * 100;
+
+            let barsHtml = "";
+            if (absenceMode === 'combined') {
+                barsHtml = `
+                    <div class="absence-bars">
+                        <div class="absence-bar-container">
+                            <div class="absence-bar-label">Dias</div>
+                            <div class="absence-bar-track">
+                                <div class="absence-bar days-bar" style="width: ${pctDays}%;"></div>
+                            </div>
+                            <div class="absence-bar-val">${c.days.toFixed(1)}d</div>
+                        </div>
+                        <div class="absence-bar-container">
+                            <div class="absence-bar-label">Horas</div>
+                            <div class="absence-bar-track">
+                                <div class="absence-bar hours-bar" style="width: ${pctHours}%;"></div>
+                            </div>
+                            <div class="absence-bar-val">${c.hours.toFixed(1)}h</div>
+                        </div>
+                    </div>
+                `;
+            } else if (absenceMode === 'days') {
+                barsHtml = `
+                    <div class="absence-bars">
+                        <div class="absence-bar-container">
+                            <div class="absence-bar-label">Dias</div>
+                            <div class="absence-bar-track">
+                                <div class="absence-bar days-bar" style="width: ${pctDays}%;"></div>
+                            </div>
+                            <div class="absence-bar-val">${c.days.toFixed(1)}d</div>
+                        </div>
+                    </div>
+                `;
+            } else if (absenceMode === 'hours') {
+                barsHtml = `
+                    <div class="absence-bars">
+                        <div class="absence-bar-container">
+                            <div class="absence-bar-label">Horas</div>
+                            <div class="absence-bar-track">
+                                <div class="absence-bar hours-bar" style="width: ${pctHours}%;"></div>
+                            </div>
+                            <div class="absence-bar-val">${c.hours.toFixed(1)}h</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            row.innerHTML = `
+                <div class="absence-info">
+                    <span class="absence-name">${escapeHtml(c.name)}</span>
+                    <span class="absence-value">${text}</span>
+                </div>
+                ${barsHtml}
+            `;
+            listContainer.appendChild(row);
+        });
+    }
+
+    // Summary Table Javascript Engine
+    function aggregateTableData(filtered) {
+        const summaries = {};
+        filtered.forEach(r => {
+            const colab = r.colaborador;
+            if (!summaries[colab]) {
+                summaries[colab] = {
+                    colaborador: colab,
+                    atestados_count: 0,
+                    total_dias: 0.0,
+                    total_horas: 0.0,
+                    inss_sim_count: 0,
+                    inss_nao_count: 0,
+                    inss_nao_informado_count: 0,
+                    first_date: r.data,
+                    last_date: r.data
+                };
+            }
+            const s = summaries[colab];
+            s.atestados_count += 1;
+            
+            if (r.unidade === 'days') s.total_dias += r.quantidade;
+            else if (r.unidade === 'hours') s.total_horas += r.quantidade;
+
+            if (r.inss === 'SIM') s.inss_sim_count++;
+            else if (r.inss === 'NÃO') s.inss_nao_count++;
+            else s.inss_nao_informado_count++;
+
+            if (r.data < s.first_date) s.first_date = r.data;
+            if (r.data > s.last_date) s.last_date = r.data;
+        });
+
+        tableData = Object.values(summaries);
+        tableCurrentPage = 1; // Reset to page 1
+    }
+
+    function sortTableData() {
+        tableData.sort((a, b) => {
+            let valA = a[tableSortField];
+            let valB = b[tableSortField];
+
+            if (typeof valA === 'string') {
+                return tableSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            } else {
+                return tableSortAsc ? valA - valB : valB - valA;
+            }
+        });
+    }
+
+    function renderTable() {
+        sortTableData();
+
+        const q = tableSearchQuery.toLowerCase().trim();
+        const searchedData = q ? tableData.filter(d => d.colaborador.toLowerCase().includes(q)) : tableData;
+
+        const totalItems = searchedData.length;
+        const totalPages = Math.ceil(totalItems / tablePageSize) || 1;
+        if (tableCurrentPage > totalPages) tableCurrentPage = totalPages;
+
+        const startIndex = (tableCurrentPage - 1) * tablePageSize;
+        const endIndex = Math.min(startIndex + tablePageSize, totalItems);
+        const paginatedData = searchedData.slice(startIndex, endIndex);
+
+        const tbody = document.getElementById('summary-table-body');
+        tbody.innerHTML = "";
+
+        if (paginatedData.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${inssAvailable ? 9 : 6}" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Nenhum colaborador encontrado para os filtros atuais.</td></tr>`;
+        } else {
+            paginatedData.forEach(d => {
+                const tr = document.createElement('tr');
+                let inssCells = "";
+                if (inssAvailable) {
+                    inssCells = `
+                        <td style="text-align:center; color: var(--color-success); font-weight: 500;">${d.inss_sim_count}</td>
+                        <td style="text-align:center; color: var(--text-secondary);">${d.inss_nao_count}</td>
+                        <td style="text-align:center; color: var(--text-secondary);">${d.inss_nao_informado_count}</td>
+                    `;
+                }
+                tr.innerHTML = `
+                    <td><strong>${escapeHtml(d.colaborador)}</strong></td>
+                    <td style="text-align:center;">${d.atestados_count}</td>
+                    <td style="text-align:center;">${d.total_dias.toFixed(1)}</td>
+                    <td style="text-align:center;">${d.total_horas.toFixed(1)}</td>
+                    ${inssCells}
+                    <td style="text-align:center; color: var(--text-secondary);">${formatDateToDMY(d.first_date)}</td>
+                    <td style="text-align:center; color: var(--text-secondary);">${formatDateToDMY(d.last_date)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        document.getElementById('table-info').innerText = totalItems > 0 
+            ? `Mostrando ${startIndex + 1}-${endIndex} de ${totalItems} colaboradores.`
+            : `Mostrando 0-0 de 0 colaboradores.`;
+
+        const paginationWrapper = document.getElementById('table-pagination');
+        paginationWrapper.innerHTML = "";
+
+        if (totalPages > 1) {
+            const btnPrev = document.createElement('button');
+            btnPrev.className = `btn btn-secondary btn-small`;
+            btnPrev.disabled = tableCurrentPage === 1;
+            btnPrev.innerHTML = `<i class="fa-solid fa-angle-left"></i>`;
+            btnPrev.onclick = () => { tableCurrentPage--; renderTable(); };
+            paginationWrapper.appendChild(btnPrev);
+
+            const label = document.createElement('span');
+            label.innerText = `Página ${tableCurrentPage} de ${totalPages}`;
+            label.style.margin = "0 0.5rem";
+            paginationWrapper.appendChild(label);
+
+            const btnNext = document.createElement('button');
+            btnNext.className = `btn btn-secondary btn-small`;
+            btnNext.disabled = tableCurrentPage === totalPages;
+            btnNext.innerHTML = `<i class="fa-solid fa-angle-right"></i>`;
+            btnNext.onclick = () => { tableCurrentPage++; renderTable(); };
+            paginationWrapper.appendChild(btnNext);
+        }
+    }
+
+    function handleSearch() {
+        tableSearchQuery = document.getElementById('table-search').value;
+        tableCurrentPage = 1;
+        renderTable();
+    }
+
+    function changePageSize() {
+        tablePageSize = parseInt(document.getElementById('table-page-size').value);
+        tableCurrentPage = 1;
+        renderTable();
+    }
+
+    function setSort(field) {
+        if (tableSortField === field) {
+            tableSortAsc = !tableSortAsc;
+        } else {
+            tableSortField = field;
+            tableSortAsc = true;
+        }
+        
+        const fields = ['colaborador', 'atestados_count', 'total_dias', 'total_horas'];
+        fields.forEach(f => {
+            const icon = document.getElementById(`sort-icon-${f}`);
+            if (icon) {
+                if (f === tableSortField) {
+                    icon.className = tableSortAsc ? "fa-solid fa-sort-up" : "fa-solid fa-sort-down";
+                    icon.style.color = "var(--color-primary)";
+                } else {
+                    icon.className = "fa-solid fa-sort";
+                    icon.style.color = "";
+                }
+            }
+        });
+
+        renderTable();
+    }
+
+    function escapeHtml(str) {
+        return str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Chart.js initialization when DOM is loaded
+    document.addEventListener("DOMContentLoaded", () => {
+        setupFilterChoices();
+        aggregateTableData(rawRecords);
+
+        // Chart 1 Setup (Atestados por Colaborador - Horizontal Bar)
+        const ctx1 = document.getElementById('chart-colab-atestados').getContext('2d');
+        chartColabAtestadosObj = new Chart(ctx1, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Quantidade de Atestados',
+                    data: [],
+                    backgroundColor: 'rgba(234, 197, 50, 0.7)',
+                    borderColor: 'rgba(234, 197, 50, 1)',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                }
+            }
+        });
+
+        // Chart 2 Setup (Temporal Evolution - Line)
+        const ctx2 = document.getElementById('chart-temporal').getContext('2d');
+        chartTemporalObj = new Chart(ctx2, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Atestados por Mês',
+                    data: [],
+                    backgroundColor: 'rgba(234, 197, 50, 0.15)',
+                    borderColor: 'rgba(234, 197, 50, 1)',
+                    borderWidth: 2,
+                    tension: 0.2,
+                    fill: true,
+                    pointBackgroundColor: 'rgba(234, 197, 50, 1)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+                    y: { ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }
+            }
+        });
+
+        // Chart 3 Setup (Atestados por Função - Bar)
+        const ctx3 = document.getElementById('chart-funcao').getContext('2d');
+        chartFuncaoObj = new Chart(ctx3, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Atestados por Função',
+                    data: [],
+                    backgroundColor: 'rgba(234, 197, 50, 0.7)',
+                    borderColor: 'rgba(234, 197, 50, 1)',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+                    y: { ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }
+            }
+        });
+
+        // Chart 4 Setup (CID Agregado - Doughnut)
+        const ctx4 = document.getElementById('chart-cid').getContext('2d');
+        chartCidObj = new Chart(ctx4, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#eac532', '#3b82f6', '#10b981', '#a855f7', 
+                        '#ec4899', '#f97316', '#06b6d4', '#64748b'
+                    ],
+                    borderWidth: 1,
+                    borderColor: '#1e293b'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: '#94a3b8', font: { family: 'Outfit', size: 11 } }
+                    }
+                }
+            }
+        });
+
+        // Chart 5 Setup (INSS - Horizontal Bar)
+        if (inssAvailable) {
+            const ctxInss = document.getElementById('chart-inss').getContext('2d');
+            chartInssObj = new Chart(ctxInss, {
+                type: 'bar',
+                data: {
+                    labels: ['Sim', 'Não', 'Não informado'],
+                    datasets: [{
+                        label: 'Atestados',
+                        data: [],
+                        backgroundColor: [
+                            'rgba(234, 197, 50, 0.7)', // SIM (brand yellow)
+                            'rgba(148, 163, 184, 0.5)', // NÃO (neutral slate)
+                            'rgba(51, 65, 85, 0.5)'     // NÃO INFORMADO (dark slate)
+                        ],
+                        borderColor: [
+                            'rgba(234, 197, 50, 1)',
+                            'rgba(148, 163, 184, 1)',
+                            'rgba(51, 65, 85, 1)'
+                        ],
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { ticks: { precision: 0, color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        // Run initial render to draw charts and tables with original records
+        applyFilters();
+    });
+</script>
+{% endif %}
+{% endblock %}

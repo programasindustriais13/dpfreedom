@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+
+{% block title %}Acesso Negado - Departamento Pessoal{% endblock %}
+
+{% block content %}
+<div class="container-login">
+    <div class="login-card acesso-negado-container">
+        <div class="text-danger-icon">
+            <i class="fa-solid fa-shield-virus"></i>
+        </div>
+        <h1 class="login-title" style="color: var(--color-danger);">Acesso Negado (403)</h1>
+        
+        <p class="login-subtitle" style="margin-bottom: 1.5rem;">
+            Seu usuário não possui a permissão operacional de <strong>Departamento Pessoal</strong> necessária para acessar este sistema.
+        </p>
+
+        <div class="alert-info-box" style="text-align: left; margin-bottom: 2rem;">
+            <strong>Aviso de Segurança:</strong><br>
+            Acessos administrativos padrão (<code>is_staff</code> ou <code>is_superuser</code>) não concedem acesso automático aos dados de atestados de saúde. O acesso é restrito unicamente a membros do grupo operacional do Departamento Pessoal.
+        </div>
+
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+            <form action="{% url 'logout' %}" method="post" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary" id="change-user-button">
+                    <i class="fa-solid fa-user-gear"></i> Alternar Usuário
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

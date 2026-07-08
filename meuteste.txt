@@ -1,0 +1,8 @@
+Username: ana_rh
+Password: AnaRhPass123!
+Group: Member of RH (Access Allowed)
+
+Created Common User (For negative testing):
+Username: colaborador_comum
+Password: ColaboradorPass123!
+Group: None (Access Denied / 403 redirect)
