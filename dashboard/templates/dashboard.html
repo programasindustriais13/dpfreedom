@@ -25,6 +25,80 @@
         outline: none;
         border-color: var(--color-primary);
     }
+
+    /* Navigation Tabs Styling */
+    .main-tabs-container {
+        display: flex;
+        gap: 0.5rem;
+        border-bottom: 2px solid var(--border-color);
+        padding-bottom: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .tab-btn {
+        background-color: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 0.75rem 1.25rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        border-radius: 0.375rem;
+        transition: var(--transition-smooth);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .tab-btn:hover {
+        color: var(--text-primary);
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+    .tab-btn.active {
+        color: var(--color-primary-text-dark);
+        background-color: var(--color-primary);
+    }
+    .tab-counter {
+        background-color: rgba(0, 0, 0, 0.2);
+        color: inherit;
+        padding: 0.1rem 0.4rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .tab-btn.active .tab-counter {
+        background-color: rgba(0, 0, 0, 0.15);
+    }
+
+    .sub-tabs-container {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        background-color: rgba(30, 41, 59, 0.5);
+        padding: 0.35rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border-color);
+        align-self: flex-start;
+    }
+    .sub-tab-btn {
+        background-color: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 0.25rem;
+        transition: var(--transition-smooth);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .sub-tab-btn:hover {
+        color: var(--text-primary);
+    }
+    .sub-tab-btn.active {
+        background-color: var(--border-color);
+        color: var(--text-primary);
+    }
 </style>
 {% endblock %}
 
@@ -161,6 +235,13 @@
 
 {% else %}
 <!-- DASHBOARD VIEW STATE -->
+{% if not parsed_data.situacao_available %}
+<!-- Situacao missing warning banner -->
+<div class="alert-info-box" style="background-color: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); color: #fca5a5;">
+    <i class="fa-solid fa-triangle-exclamation"></i> A coluna <strong>“Ativo/Desligado”</strong> não foi encontrada. Os colaboradores não puderam ser separados entre Ativos, INSS e Desligados.
+</div>
+{% endif %}
+
 {% if not parsed_data.inss_available %}
 <!-- INSS missing warning banner -->
 <div class="alert-info-box" style="background-color: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); color: #fca5a5;">
@@ -180,6 +261,28 @@
         </a>
     </div>
 </div>
+
+<!-- Main navigation tabs -->
+<div class="main-tabs-container" style="margin-top: 1rem; margin-bottom: 1.5rem;">
+    <button class="tab-btn active" id="tab-btn-ativos" onclick="selectTab('ATIVO')">
+        <i class="fa-solid fa-user-check"></i> Colaboradores Ativos <span class="tab-counter" id="counter-ativos">{{ parsed_data.quality_metrics.ativos_count|default:0 }}</span>
+    </button>
+    <button class="tab-btn" id="tab-btn-especiais" onclick="selectTab('INSS')">
+        <i class="fa-solid fa-triangle-exclamation"></i> Situações Especiais <span class="tab-counter" id="counter-especiais">{% widthratio parsed_data.quality_metrics.inss_count|add:parsed_data.quality_metrics.desligados_count 1 1 %}</span>
+    </button>
+</div>
+
+<!-- Secondary navigation tabs for Situações Especiais -->
+<div id="situacoes-especiais-nav" class="sub-tabs-container" style="display: none;">
+    <button class="sub-tab-btn" id="sub-tab-btn-inss" onclick="selectTab('INSS')">
+        <i class="fa-solid fa-hand-holding-medical"></i> Afastados pelo INSS <span class="tab-counter" id="counter-inss">{{ parsed_data.quality_metrics.inss_count|default:0 }}</span>
+    </button>
+    <button class="sub-tab-btn" id="sub-tab-btn-desligados" onclick="selectTab('DESLIGADO')">
+        <i class="fa-solid fa-user-slash"></i> Colaboradores Desligados <span class="tab-counter" id="counter-desligados">{{ parsed_data.quality_metrics.desligados_count|default:0 }}</span>
+    </button>
+</div>
+
+<div id="dashboard-main-view">
 
 <!-- Indicator Cards -->
 <div class="dashboard-grid">
@@ -407,7 +510,59 @@
     </div>
 </div>
 
+<!-- Empty View state -->
+<div id="dashboard-empty-view" class="card" style="text-align: center; padding: 3rem 2rem; margin-bottom: 2rem; display: none;">
+    <div style="font-size: 3rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+        <i class="fa-solid fa-folder-open"></i>
+    </div>
+    <h3 id="empty-view-message" style="font-size: 1.25rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;"></h3>
+</div>
+
 <!-- Quality Checks Panel -->
+<div class="card" style="margin-bottom: 1.5rem; margin-top: 1.5rem;">
+    <div class="card-title" style="color: var(--color-primary);">
+        <span><i class="fa-solid fa-list-check"></i> Diagnóstico de Qualidade e Classificação Cadastral</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; font-size: 0.9rem;">
+        <div>
+            <h4 style="font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">Resumo de Classificação</h4>
+            <ul style="list-style: none; display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-secondary);">
+                <li>Colaboradores Ativos: <strong style="color: var(--color-success);">{{ parsed_data.quality_metrics.ativos_count|default:0 }}</strong></li>
+                <li>Afastados pelo INSS: <strong style="color: var(--color-success);">{{ parsed_data.quality_metrics.inss_count|default:0 }}</strong></li>
+                <li>Colaboradores Desligados: <strong style="color: var(--color-success);">{{ parsed_data.quality_metrics.desligados_count|default:0 }}</strong></li>
+                <li>Não Classificados: <strong style="color: var(--color-warning);">{{ parsed_data.quality_metrics.nao_classificados_count|default:0 }}</strong></li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">Diagnóstico de Pendências</h4>
+            <ul style="list-style: none; display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-secondary);">
+                <li>Situação Ausente (cadastro): <strong style="color: {% if parsed_data.quality_metrics.situacao_ausente_count %}var(--color-danger){% else %}var(--text-secondary){% endif %};">{{ parsed_data.quality_metrics.situacao_ausente_count|default:0 }}</strong></li>
+                <li>Conflitos (Ativo vs Desligado): <strong style="color: {% if parsed_data.quality_metrics.conflito_count %}var(--color-danger){% else %}var(--text-secondary){% endif %};">{{ parsed_data.quality_metrics.conflito_count|default:0 }}</strong></li>
+                <li>Ativo com INSS Não Informado: <strong style="color: {% if parsed_data.quality_metrics.inss_ausente_ativo_count %}var(--color-danger){% else %}var(--text-secondary){% endif %};">{{ parsed_data.quality_metrics.inss_ausente_ativo_count|default:0 }}</strong></li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">Status de Cabeçalhos</h4>
+            <ul style="list-style: none; display: flex; flex-direction: column; gap: 0.5rem; color: var(--text-secondary);">
+                <li>Coluna "Ativo/Desligado": 
+                    {% if parsed_data.situacao_available %}
+                    <span style="color: var(--color-success); font-weight: 500;"><i class="fa-solid fa-circle-check"></i> Encontrada</span>
+                    {% else %}
+                    <span style="color: var(--color-danger); font-weight: 500;"><i class="fa-solid fa-circle-xmark"></i> Ausente</span>
+                    {% endif %}
+                </li>
+                <li>Coluna "Houve Afastamento Pelo INSS?": 
+                    {% if parsed_data.inss_available %}
+                    <span style="color: var(--color-success); font-weight: 500;"><i class="fa-solid fa-circle-check"></i> Encontrada</span>
+                    {% else %}
+                    <span style="color: var(--color-danger); font-weight: 500;"><i class="fa-solid fa-circle-xmark"></i> Ausente</span>
+                    {% endif %}
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+
 <div class="quality-grid">
     <div class="card">
         <div class="card-title" style="color: #fca5a5;">
@@ -468,7 +623,7 @@
     let chartCidObj = null;
     let chartInssObj = null;
 
-    // Table pagination, search and sort state
+    // Table pagination, search and sort state (acting as globals for currently active category)
     let tableSearchQuery = "";
     let tableCurrentPage = 1;
     let tablePageSize = 10;
@@ -481,20 +636,144 @@
     let absenceSort = 'atestados'; // 'atestados', 'dias', 'horas', 'nome'
     let currentFilteredRecords = [];
 
-    // Setup initial select filter choices based on parsed data
+    // State of each dashboard
+    let currentCategory = 'ATIVO';
+    const dashboardStates = {
+        'ATIVO': {
+            filters: { dateStart: "", dateEnd: "", colaborador: "", funcao: "", cid: "" },
+            tableSearchQuery: "",
+            tableCurrentPage: 1,
+            tablePageSize: 10,
+            tableSortField: "colaborador",
+            tableSortAsc: true,
+            absenceMode: 'combined',
+            absenceSort: 'atestados'
+        },
+        'INSS': {
+            filters: { dateStart: "", dateEnd: "", colaborador: "", funcao: "", cid: "" },
+            tableSearchQuery: "",
+            tableCurrentPage: 1,
+            tablePageSize: 10,
+            tableSortField: "colaborador",
+            tableSortAsc: true,
+            absenceMode: 'combined',
+            absenceSort: 'atestados'
+        },
+        'DESLIGADO': {
+            filters: { dateStart: "", dateEnd: "", colaborador: "", funcao: "", cid: "" },
+            tableSearchQuery: "",
+            tableCurrentPage: 1,
+            tablePageSize: 10,
+            tableSortField: "colaborador",
+            tableSortAsc: true,
+            absenceMode: 'combined',
+            absenceSort: 'atestados'
+        }
+    };
+
+    function syncStateToGlobals(category) {
+        const state = dashboardStates[category];
+        document.getElementById('filter-date-start').value = state.filters.dateStart;
+        document.getElementById('filter-date-end').value = state.filters.dateEnd;
+        document.getElementById('filter-colaborador').value = state.filters.colaborador;
+        document.getElementById('filter-funcao').value = state.filters.funcao;
+        document.getElementById('filter-cid').value = state.filters.cid;
+        
+        tableSearchQuery = state.tableSearchQuery;
+        document.getElementById('table-search').value = tableSearchQuery;
+        
+        tableCurrentPage = state.tableCurrentPage;
+        
+        tablePageSize = state.tablePageSize;
+        document.getElementById('table-page-size').value = tablePageSize;
+        
+        tableSortField = state.tableSortField;
+        tableSortAsc = state.tableSortAsc;
+        
+        absenceMode = state.absenceMode;
+        absenceSort = state.absenceSort;
+        document.getElementById('absence-sort').value = absenceSort;
+
+        // Sync tab button active classes for absence modes
+        document.getElementById('btn-mode-combined').classList.remove('active');
+        document.getElementById('btn-mode-days').classList.remove('active');
+        document.getElementById('btn-mode-hours').classList.remove('active');
+        if (absenceMode === 'combined') document.getElementById('btn-mode-combined').classList.add('active');
+        else if (absenceMode === 'days') document.getElementById('btn-mode-days').classList.add('active');
+        else if (absenceMode === 'hours') document.getElementById('btn-mode-hours').classList.add('active');
+    }
+
+    function syncGlobalsToState(category) {
+        const state = dashboardStates[category];
+        state.filters.dateStart = document.getElementById('filter-date-start').value;
+        state.filters.dateEnd = document.getElementById('filter-date-end').value;
+        state.filters.colaborador = document.getElementById('filter-colaborador').value;
+        state.filters.funcao = document.getElementById('filter-funcao').value;
+        state.filters.cid = document.getElementById('filter-cid').value;
+        
+        state.tableSearchQuery = tableSearchQuery;
+        state.tableCurrentPage = tableCurrentPage;
+        state.tablePageSize = tablePageSize;
+        state.tableSortField = tableSortField;
+        state.tableSortAsc = tableSortAsc;
+        state.absenceMode = absenceMode;
+        state.absenceSort = absenceSort;
+    }
+
+    // Select Tab Navigation Handler
+    function selectTab(category) {
+        // Save current globals to active category state
+        syncGlobalsToState(currentCategory);
+        
+        // Remove active class from all main and sub tab buttons
+        document.getElementById('tab-btn-ativos').classList.remove('active');
+        document.getElementById('tab-btn-especiais').classList.remove('active');
+        document.getElementById('sub-tab-btn-inss').classList.remove('active');
+        document.getElementById('sub-tab-btn-desligados').classList.remove('active');
+        
+        // Toggle secondary tab container visibility and set active tab highlighting
+        if (category === 'ATIVO') {
+            document.getElementById('tab-btn-ativos').classList.add('active');
+            document.getElementById('situacoes-especiais-nav').style.display = 'none';
+        } else {
+            document.getElementById('tab-btn-especiais').classList.add('active');
+            document.getElementById('situacoes-especiais-nav').style.display = 'flex';
+            
+            if (category === 'INSS') {
+                document.getElementById('sub-tab-btn-inss').classList.add('active');
+            } else if (category === 'DESLIGADO') {
+                document.getElementById('sub-tab-btn-desligados').classList.add('active');
+            }
+        }
+        
+        // Update current category and populate filters for this category
+        currentCategory = category;
+        setupFilterChoices();
+        
+        // Restore globals from new category state
+        syncStateToGlobals(category);
+        
+        // Apply filters (which will trigger redraw)
+        applyFilters();
+    }
+
+    // Setup select filter choices based on current category records
     function setupFilterChoices() {
         const colaboradores = new Set();
         const funcoes = new Set();
         const cids = new Set();
 
         rawRecords.forEach(r => {
-            if (r.colaborador) colaboradores.add(r.colaborador);
-            if (r.funcao) funcoes.add(r.funcao);
-            if (r.cid) cids.add(r.cid);
+            if (r.categoria === currentCategory) {
+                if (r.colaborador_display) colaboradores.add(r.colaborador_display);
+                if (r.funcao) funcoes.add(r.funcao);
+                if (r.cid) cids.add(r.cid);
+            }
         });
 
-        // Populate Colaborador dropdown
+        // Clear existing choices except the first "Todos/Todas" option
         const selectColab = document.getElementById('filter-colaborador');
+        selectColab.innerHTML = '<option value="">Todos</option>';
         Array.from(colaboradores).sort().forEach(c => {
             const opt = document.createElement('option');
             opt.value = c;
@@ -502,8 +781,8 @@
             selectColab.appendChild(opt);
         });
 
-        // Populate Funcao dropdown
         const selectFuncao = document.getElementById('filter-funcao');
+        selectFuncao.innerHTML = '<option value="">Todas</option>';
         Array.from(funcoes).sort().forEach(f => {
             const opt = document.createElement('option');
             opt.value = f;
@@ -511,8 +790,8 @@
             selectFuncao.appendChild(opt);
         });
 
-        // Populate CID dropdown
         const selectCid = document.getElementById('filter-cid');
+        selectCid.innerHTML = '<option value="">Todos</option>';
         Array.from(cids).sort().forEach(c => {
             const opt = document.createElement('option');
             opt.value = c;
@@ -543,20 +822,49 @@
         const filterColab = document.getElementById('filter-colaborador').value;
         const filterFuncao = document.getElementById('filter-funcao').value;
         const filterCid = document.getElementById('filter-cid').value;
-        
-        const filterInssEl = document.getElementById('filter-inss');
-        const filterInss = filterInssEl ? filterInssEl.value : "";
 
-        // Filter the raw records list
+        // Check if category itself is empty
+        const hasCategoryData = rawRecords.some(r => r.categoria === currentCategory);
+        const emptyMessages = {
+            'ATIVO': 'Nenhum colaborador ativo foi encontrado para os dados informados.',
+            'INSS': 'Nenhum colaborador afastado pelo INSS foi encontrado.',
+            'DESLIGADO': 'Nenhum colaborador desligado foi encontrado.'
+        };
+
+        if (!hasCategoryData) {
+            document.getElementById('dashboard-main-view').style.display = 'none';
+            document.getElementById('dashboard-empty-view').style.display = 'block';
+            document.getElementById('empty-view-message').innerText = emptyMessages[currentCategory];
+            return;
+        } else {
+            document.getElementById('dashboard-main-view').style.display = 'block';
+            document.getElementById('dashboard-empty-view').style.display = 'none';
+        }
+
+        // Hide INSS Filter group because it's redundant
+        const filterInssGroup = document.getElementById('filter-inss-group');
+        if (filterInssGroup) filterInssGroup.style.display = 'none';
+
+        // Filter the records that belong to currentCategory
         const filtered = rawRecords.filter(r => {
+            if (r.categoria !== currentCategory) return false;
             if (filterStart && r.data < filterStart) return false;
             if (filterEnd && r.data > filterEnd) return false;
-            if (filterColab && r.colaborador !== filterColab) return false;
+            if (filterColab && r.colaborador_display !== filterColab) return false;
             if (filterFuncao && r.funcao !== filterFuncao) return false;
             if (filterCid && r.cid !== filterCid) return false;
-            if (filterInss && r.inss !== filterInss) return false;
             return true;
         });
+
+        // Hide INSS Chart if category is ATIVO or INSS
+        const cardChartInss = document.getElementById('card-chart-inss');
+        if (cardChartInss) {
+            if (currentCategory === 'ATIVO' || currentCategory === 'INSS') {
+                cardChartInss.style.display = 'none';
+            } else {
+                cardChartInss.style.display = 'block';
+            }
+        }
 
         // Save reference for card
         currentFilteredRecords = filtered;
@@ -573,6 +881,9 @@
         // Aggregate table data and re-render
         aggregateTableData(filtered);
         renderTable();
+        
+        // Save current globals back to the state of this category
+        syncGlobalsToState(currentCategory);
     }
 
     function clearFilters() {
@@ -581,16 +892,12 @@
         document.getElementById('filter-colaborador').value = "";
         document.getElementById('filter-funcao').value = "";
         document.getElementById('filter-cid').value = "";
-        
-        const filterInssEl = document.getElementById('filter-inss');
-        if (filterInssEl) filterInssEl.value = "";
-        
         applyFilters();
     }
 
     function updateIndicators(filtered) {
         const totalValid = filtered.length;
-        const colabs = new Set(filtered.map(r => r.colaborador));
+        const colabs = new Set(filtered.map(r => r.colaborador_display));
         const colabCount = colabs.size;
 
         let totalDias = 0;
@@ -653,7 +960,7 @@
         const cCid = {};
 
         filtered.forEach(r => {
-            const colab = r.colaborador;
+            const colab = r.colaborador_display;
             cAtestados[colab] = (cAtestados[colab] || 0) + 1;
 
             const monthKey = r.data.substring(0, 7); // "2026-07"
@@ -707,7 +1014,7 @@
         chartCidObj.update();
 
         // Update Chart 5: INSS (Horizontal Bar)
-        if (inssAvailable && chartInssObj) {
+        if (inssAvailable && chartInssObj && currentCategory === 'DESLIGADO') {
             let inssSim = 0;
             let inssNao = 0;
             let inssNaoInformado = 0;
@@ -733,11 +1040,13 @@
         else if (mode === 'days') document.getElementById('btn-mode-days').classList.add('active');
         else if (mode === 'hours') document.getElementById('btn-mode-hours').classList.add('active');
         
+        syncGlobalsToState(currentCategory);
         renderAbsenceTimeList();
     }
 
     function changeAbsenceSort() {
         absenceSort = document.getElementById('absence-sort').value;
+        syncGlobalsToState(currentCategory);
         renderAbsenceTimeList();
     }
 
@@ -747,7 +1056,7 @@
 
         const collabs = {};
         currentFilteredRecords.forEach(r => {
-            const name = r.colaborador;
+            const name = r.colaborador_display;
             if (!collabs[name]) {
                 collabs[name] = { name: name, days: 0, hours: 0, count: 0 };
             }
@@ -873,7 +1182,7 @@
     function aggregateTableData(filtered) {
         const summaries = {};
         filtered.forEach(r => {
-            const colab = r.colaborador;
+            const colab = r.colaborador_display;
             if (!summaries[colab]) {
                 summaries[colab] = {
                     colaborador: colab,
@@ -973,7 +1282,7 @@
             btnPrev.className = `btn btn-secondary btn-small`;
             btnPrev.disabled = tableCurrentPage === 1;
             btnPrev.innerHTML = `<i class="fa-solid fa-angle-left"></i>`;
-            btnPrev.onclick = () => { tableCurrentPage--; renderTable(); };
+            btnPrev.onclick = () => { tableCurrentPage--; syncGlobalsToState(currentCategory); renderTable(); };
             paginationWrapper.appendChild(btnPrev);
 
             const label = document.createElement('span');
@@ -985,7 +1294,7 @@
             btnNext.className = `btn btn-secondary btn-small`;
             btnNext.disabled = tableCurrentPage === totalPages;
             btnNext.innerHTML = `<i class="fa-solid fa-angle-right"></i>`;
-            btnNext.onclick = () => { tableCurrentPage++; renderTable(); };
+            btnNext.onclick = () => { tableCurrentPage++; syncGlobalsToState(currentCategory); renderTable(); };
             paginationWrapper.appendChild(btnNext);
         }
     }
@@ -993,12 +1302,14 @@
     function handleSearch() {
         tableSearchQuery = document.getElementById('table-search').value;
         tableCurrentPage = 1;
+        syncGlobalsToState(currentCategory);
         renderTable();
     }
 
     function changePageSize() {
         tablePageSize = parseInt(document.getElementById('table-page-size').value);
         tableCurrentPage = 1;
+        syncGlobalsToState(currentCategory);
         renderTable();
     }
 
@@ -1024,6 +1335,7 @@
             }
         });
 
+        syncGlobalsToState(currentCategory);
         renderTable();
     }
 
@@ -1038,9 +1350,6 @@
 
     // Chart.js initialization when DOM is loaded
     document.addEventListener("DOMContentLoaded", () => {
-        setupFilterChoices();
-        aggregateTableData(rawRecords);
-
         // Chart 1 Setup (Atestados por Colaborador - Horizontal Bar)
         const ctx1 = document.getElementById('chart-colab-atestados').getContext('2d');
         chartColabAtestadosObj = new Chart(ctx1, {
@@ -1196,7 +1505,7 @@
         }
 
         // Run initial render to draw charts and tables with original records
-        applyFilters();
+        selectTab('ATIVO');
     });
 </script>
 {% endif %}

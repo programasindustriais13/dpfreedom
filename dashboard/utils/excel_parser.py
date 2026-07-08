@@ -55,6 +55,9 @@ def find_headers(sheet):
             # Matching INSS (optional)
             elif "inss" in norm:
                 mapping["inss"] = c_idx
+            # Matching Ativo/Desligado (optional)
+            elif "ativo" in norm and "desligado" in norm:
+                mapping["situacao"] = c_idx
 
         # We need the 5 mandatory mappings to consider it a valid header row
         mandatory = {"nome", "funcao", "data", "cid", "quantidade"}
@@ -169,6 +172,29 @@ def normalize_inss_value(val):
     # Invalid value, returns warning message and treats as NÃO INFORMADO
     return "NÃO INFORMADO", f"Valor '{val}' inválido na coluna do INSS. Tratado como NÃO INFORMADO."
 
+def normalize_situation_value(val):
+    """
+    Normalizes the Ativo/Desligado column values.
+    Returns (normalized_value, warning_msg).
+    Normalized values: 'ATIVO', 'DESLIGADO', 'NÃO INFORMADO'.
+    """
+    if val is None:
+        return "NÃO INFORMADO", None
+    
+    val_str = str(val).strip().lower()
+    # Normalize unicode to remove accents (e.g. ativa -> ativa)
+    val_norm = unicodedata.normalize('NFKD', val_str).encode('ASCII', 'ignore').decode('ASCII')
+    
+    if val_norm in ("ativo", "ativa"):
+        return "ATIVO", None
+    if val_norm in ("desligado", "desligada"):
+        return "DESLIGADO", None
+    if not val_str:
+        return "NÃO INFORMADO", None
+    
+    # Invalid value, returns warning message and treats as NÃO INFORMADO
+    return "NÃO INFORMADO", f"Valor '{val}' inválido na coluna de situação. Tratado como NÃO INFORMADO."
+
 def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows=1000):
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True, read_only=True)
@@ -211,6 +237,8 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
     idx_qty = header_mapping["quantidade"]
     idx_inss = header_mapping.get("inss")
     inss_available = idx_inss is not None
+    idx_situacao = header_mapping.get("situacao")
+    situacao_available = idx_situacao is not None
 
     # Iterate rows starting after the header row
     for curr_row_idx, row in enumerate(active_sheet.iter_rows(min_row=header_row_idx + 1, values_only=True), header_row_idx + 1):
@@ -233,6 +261,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
         raw_data = row[idx_data] if idx_data < len(row) else None
         raw_cid = row[idx_cid] if idx_cid < len(row) else None
         raw_qty = row[idx_qty] if idx_qty < len(row) else None
+        raw_situacao = row[idx_situacao] if (situacao_available and idx_situacao < len(row)) else None
 
         # 1. Validate Nome
         if raw_nome is None or not str(raw_nome).strip():
@@ -290,8 +319,19 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
                     "detalhe": warning
                 })
 
+        # 7. Ativo/Desligado (optional)
+        situacao_val = "NÃO INFORMADO"
+        if situacao_available:
+            situacao_val, warning = normalize_situation_value(raw_situacao)
+            if warning:
+                inconsistencies.append({
+                    "linha": curr_row_idx,
+                    "erro": "Valor inválido na coluna de situação",
+                    "detalhe": warning
+                })
+
         # Check for potential duplicates
-        record_tuple = (nome, funcao, data_parsed.isoformat(), cid, qty_num, unit, inss_val)
+        record_tuple = (nome, funcao, data_parsed.isoformat(), cid, qty_num, unit, inss_val, situacao_val)
         if record_tuple in seen_tuples:
             duplicate_count += 1
             duplicates_list.append({
@@ -312,21 +352,108 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
             "cid": cid,
             "quantidade": qty_num,
             "unidade": unit,
-            "inss": inss_val
+            "inss": inss_val,
+            "situacao": situacao_val
         })
 
-    # Perform Aggregations
-    total_valid = len(valid_records)
-    total_invalid = len(inconsistencies)
-    colaboradores_unicos = len(set(r["colaborador"] for r in valid_records))
+    # Group valid records by colaborador (case-insensitive) for classification
+    colab_groups = {}
+    colab_raw_names = {}
+    for r in valid_records:
+        key = r["colaborador"].lower()
+        if key not in colab_groups:
+            colab_groups[key] = []
+            colab_raw_names[key] = []
+        colab_groups[key].append(r)
+        colab_raw_names[key].append(r["colaborador"])
+
+    from collections import Counter
+    colab_display_names = {}
+    for key, names in colab_raw_names.items():
+        # Prefer names with uppercase letters
+        upper_names = [n for n in names if any(c.isupper() for c in n)]
+        best_list = upper_names if upper_names else names
+        colab_display_names[key] = Counter(best_list).most_common(1)[0][0]
+
+    colab_categories = {}
     
-    total_dias = sum(r["quantidade"] for r in valid_records if r["unidade"] == "days")
-    total_horas = sum(r["quantidade"] for r in valid_records if r["unidade"] == "hours")
+    # Track statistics for quality panel
+    situacao_ausente_colabs = set()
+    conflito_colabs = set()
+    inss_ausente_ativo_colabs = set()
+    
+    for key, records in colab_groups.items():
+        sits = set(r["situacao"] for r in records if r["situacao"] in ("ATIVO", "DESLIGADO"))
+        
+        # Check conflict
+        if "ATIVO" in sits and "DESLIGADO" in sits:
+            colab_categories[key] = "NÃO CLASSIFICADO"
+            conflito_colabs.add(key)
+            # Add to inconsistencies
+            display_name = colab_display_names[key]
+            inconsistencies.append({
+                "linha": "Múltiplas",
+                "erro": f"Situações divergentes para o colaborador '{display_name}'",
+                "detalhe": f"O colaborador possui situações divergentes entre as {len(records)} linhas da planilha. Corrija a coluna “Ativo/Desligado” e envie o arquivo novamente."
+            })
+            continue
+            
+        if "DESLIGADO" in sits:
+            colab_categories[key] = "DESLIGADO"
+            continue
+            
+        if "ATIVO" in sits:
+            has_inss_sim = any(r["inss"] == "SIM" for r in records)
+            if has_inss_sim:
+                colab_categories[key] = "INSS"
+            else:
+                has_inss_nao = any(r["inss"] == "NÃO" for r in records)
+                if has_inss_nao:
+                    colab_categories[key] = "ATIVO"
+                else:
+                    colab_categories[key] = "NÃO CLASSIFICADO"
+                    inss_ausente_ativo_colabs.add(key)
+            continue
+            
+        # Situation is empty or absent
+        colab_categories[key] = "NÃO CLASSIFICADO"
+        situacao_ausente_colabs.add(key)
+
+    ativos_count = sum(1 for cat in colab_categories.values() if cat == "ATIVO")
+    inss_count = sum(1 for cat in colab_categories.values() if cat == "INSS")
+    desligados_count = sum(1 for cat in colab_categories.values() if cat == "DESLIGADO")
+    nao_classificados_count = sum(1 for cat in colab_categories.values() if cat == "NÃO CLASSIFICADO")
+
+    quality_metrics = {
+        "ativos_count": ativos_count,
+        "inss_count": inss_count,
+        "desligados_count": desligados_count,
+        "nao_classificados_count": nao_classificados_count,
+        "situacao_ausente_count": len(situacao_ausente_colabs),
+        "conflito_count": len(conflito_colabs),
+        "inss_ausente_ativo_count": len(inss_ausente_ativo_colabs),
+        "situacao_available": situacao_available,
+        "inss_available": inss_available
+    }
+
+    # Filter records to only those classified as ATIVO for initial backend dashboard render
+    if situacao_available:
+        aggregated_records = [r for r in valid_records if colab_categories[r["colaborador"].lower()] == "ATIVO"]
+    else:
+        aggregated_records = valid_records
+
+    # Perform Aggregations
+    total_valid = len(aggregated_records)
+    total_invalid = len(inconsistencies)
+    colaboradores_unicos = len(set(r["colaborador"] for r in aggregated_records))
+    
+    total_dias = sum(r["quantidade"] for r in aggregated_records if r["unidade"] == "days")
+    total_horas = sum(r["quantidade"] for r in aggregated_records if r["unidade"] == "hours")
 
     min_date = None
     max_date = None
-    if valid_records:
-        dates = [r["data"] for r in valid_records]
+    if aggregated_records:
+        dates = [r["data"] for r in aggregated_records]
         min_date = min(dates)
         max_date = max(dates)
 
@@ -339,7 +466,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
     inss_nao_count = 0
     inss_nao_informado_count = 0
     if inss_available:
-        for r in valid_records:
+        for r in aggregated_records:
             if r["inss"] == "SIM":
                 inss_sim_count += 1
             elif r["inss"] == "NÃO":
@@ -358,7 +485,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
     # Colaborador summaries for summary_table
     colab_summaries = {}
 
-    for r in valid_records:
+    for r in aggregated_records:
         colab = r["colaborador"]
         qty = r["quantidade"]
         unit = r["unidade"]
@@ -405,7 +532,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
 
     # 2. Evolução temporal (atestados por mês)
     atestados_por_mes = {}
-    for r in valid_records:
+    for r in aggregated_records:
         date = r["data"]
         key = (date.year, date.month)
         atestados_por_mes[key] = atestados_por_mes.get(key, 0) + 1
@@ -420,7 +547,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
 
     # 3. Atestados por Função
     atestados_por_funcao = {}
-    for r in valid_records:
+    for r in aggregated_records:
         func = r["funcao"]
         atestados_por_funcao[func] = atestados_por_funcao.get(func, 0) + 1
 
@@ -429,7 +556,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
 
     # 4. Distribuição agregada por CID (Top 7 + Outros)
     atestados_por_cid = {}
-    for r in valid_records:
+    for r in aggregated_records:
         c = r["cid"]
         atestados_por_cid[c] = atestados_por_cid.get(c, 0) + 1
 
@@ -455,7 +582,7 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
     for k in sorted(colab_summaries.keys()):
         cs = colab_summaries[k]
         summary_table.append({
-            "colaborador": cs["colaborador"],
+            "colaborador": colab_display_names[cs["colaborador"].lower()],
             "atestados_count": cs["atestados_count"],
             "total_dias": cs["total_dias"],
             "total_horas": cs["total_horas"],
@@ -471,10 +598,12 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
         "success": True,
         "sheet_name": active_sheet.title,
         "total_rows": rows_parsed,
-        "valid_count": total_valid,
+        "valid_count": len(valid_records),
         "invalid_count": total_invalid,
         "duplicate_count": duplicate_count,
         "inss_available": inss_available,
+        "situacao_available": situacao_available,
+        "quality_metrics": quality_metrics,
         "indicators": {
             "total_valid": total_valid,
             "colab_count": colaboradores_unicos,
@@ -500,12 +629,15 @@ def parse_excel_in_memory(file_content, default_unit_behavior="reject", max_rows
         "raw_valid_records": [
             {
                 "colaborador": r["colaborador"],
+                "colaborador_display": colab_display_names[r["colaborador"].lower()],
                 "funcao": r["funcao"],
                 "data": r["data"].strftime("%Y-%m-%d"),
                 "cid": r["cid"],
                 "quantidade": r["quantidade"],
                 "unidade": r["unidade"],
-                "inss": r["inss"]
+                "inss": r["inss"],
+                "situacao": r["situacao"],
+                "categoria": colab_categories[r["colaborador"].lower()]
             }
             for r in valid_records
         ]

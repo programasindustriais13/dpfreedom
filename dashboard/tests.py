@@ -299,3 +299,173 @@ class FileExtensionValidationTests(TestCase):
         self.assertIsNotNone(response.context.get('parsed_data'))
         self.assertEqual(response.context['parsed_data']['valid_count'], 1)
 
+
+class DashboardSeparationTests(TestCase):
+    def setUp(self):
+        self.headers = ["Nome do colaborador", "Função do colaborador", "Data inicial do atestado", "CID", "Quantidade de dias/ HORAS", "Houve Afastamento Pelo INSS?", "Ativo/Desligado"]
+
+    def test_situation_header_variants(self):
+        # Test recognition of Ativo/Desligado headers with space, caps, newlines
+        headers_variants = [
+            "Ativo/Desligado",
+            "ATIVO/DESLIGADO",
+            "ativo/desligado",
+            "Ativo / Desligado",
+            " Ativo \n / \t Desligado "
+        ]
+        for head in headers_variants:
+            headers = ["Nome do colaborador", "Função do colaborador", "Data inicial do atestado", "CID", "Quantidade de dias/ HORAS", "Houve Afastamento Pelo INSS?", head]
+            rows = [
+                ["Ana Silva", "Analista", "01/07/2026", "M54", "2 dias", "Não", "Ativo"]
+            ]
+            content = create_in_memory_xlsx(headers, rows)
+            result = parse_excel_in_memory(content, default_unit_behavior="reject")
+            self.assertTrue(result["success"])
+            self.assertTrue(result["situacao_available"])
+            self.assertEqual(result["quality_metrics"]["ativos_count"], 1)
+
+    def test_situation_values_normalization(self):
+        # Test normalizations as ATIVO, DESLIGADO, or NÃO INFORMADO
+        test_cases = [
+            ("ATIVO", "ATIVO"),
+            ("ativo", "ATIVO"),
+            ("ATIVA", "ATIVO"),
+            ("ativa", "ATIVO"),
+            ("  ativo  ", "ATIVO"),
+            ("DESLIGADO", "DESLIGADO"),
+            ("desligado", "DESLIGADO"),
+            ("DESLIGADA", "DESLIGADO"),
+            ("desligada", "DESLIGADO"),
+            ("  desligada  ", "DESLIGADO"),
+            ("", "NÃO CLASSIFICADO"),
+            (None, "NÃO CLASSIFICADO"),
+            ("inválido", "NÃO CLASSIFICADO")
+        ]
+        
+        for val, expected_cat in test_cases:
+            rows = [
+                ["Ana Silva", "Analista", "01/07/2026", "M54", "2 dias", "Não", val]
+            ]
+            content = create_in_memory_xlsx(self.headers, rows)
+            result = parse_excel_in_memory(content, default_unit_behavior="reject")
+            self.assertTrue(result["success"])
+            
+            # Check classification
+            record = result["raw_valid_records"][0]
+            self.assertEqual(record["categoria"], expected_cat)
+            if val == "inválido":
+                # Should generate warning inconsistency
+                self.assertTrue(any(i["erro"] == "Valor inválido na coluna de situação" for i in result["inconsistencies"]))
+
+    def test_exclusivity_rules(self):
+        # Colaborador ativo appears only in Ativos
+        # Colaborador active with INSS SIM appears only in INSS
+        # Colaborador desligado appears only in Desligados (even if they have INSS SIM)
+        rows = [
+            ["Ana Silva", "Analista", "01/07/2026", "M54", "2 dias", "Não", "Ativo"],
+            ["Carlos Souza", "Gerente", "02/07/2026", "J11", "4 horas", "Sim", "Ativo"],
+            ["Bruno Alves", "Suporte", "03/07/2026", "F43", "1 dia", "Sim", "Desligado"]
+        ]
+        content = create_in_memory_xlsx(self.headers, rows)
+        result = parse_excel_in_memory(content, default_unit_behavior="reject")
+        self.assertTrue(result["success"])
+        
+        self.assertEqual(result["quality_metrics"]["ativos_count"], 1) # Ana
+        self.assertEqual(result["quality_metrics"]["inss_count"], 1) # Carlos
+        self.assertEqual(result["quality_metrics"]["desligados_count"], 1) # Bruno
+        
+        # Verify category on raw records
+        ana_rec = next(r for r in result["raw_valid_records"] if r["colaborador"] == "Ana Silva")
+        self.assertEqual(ana_rec["categoria"], "ATIVO")
+        
+        carlos_rec = next(r for r in result["raw_valid_records"] if r["colaborador"] == "Carlos Souza")
+        self.assertEqual(carlos_rec["categoria"], "INSS")
+        
+        bruno_rec = next(r for r in result["raw_valid_records"] if r["colaborador"] == "Bruno Alves")
+        self.assertEqual(bruno_rec["categoria"], "DESLIGADO")
+
+    def test_name_grouping(self):
+        # Multiple rows with case difference and space duplicates
+        rows = [
+            ["Carlos Almeida", "Dev", "01/07/2026", "M54", "2 dias", "Não", "Ativo"],
+            ["carlos almeida", "Dev", "02/07/2026", "M54", "1 dia", "Não", "Ativo"],
+            ["Carlos  Almeida", "Dev", "03/07/2026", "M54", "4 horas", "Não", "Ativo"],
+            # Similar name but shouldn't be merged
+            ["Carlos A. Almeida", "Dev", "04/07/2026", "M54", "1 dia", "Não", "Ativo"]
+        ]
+        content = create_in_memory_xlsx(self.headers, rows)
+        result = parse_excel_in_memory(content, default_unit_behavior="reject")
+        self.assertTrue(result["success"])
+        
+        # Carlos Almeida is 1 collaborator, Carlos A. Almeida is 2nd collaborator
+        self.assertEqual(len(set(r["colaborador_display"] for r in result["raw_valid_records"])), 2)
+        
+        # Verifying display names are correct
+        display_names = set(r["colaborador_display"] for r in result["raw_valid_records"])
+        self.assertIn("Carlos Almeida", display_names)
+        self.assertIn("Carlos A. Almeida", display_names)
+
+    def test_conflict_status(self):
+        # Colaborador with Ativo in one row and Desligado in another
+        rows = [
+            ["Carlos Almeida", "Dev", "01/07/2026", "M54", "2 dias", "Não", "Ativo"],
+            ["Carlos Almeida", "Dev", "02/07/2026", "M54", "1 dia", "Não", "Desligado"]
+        ]
+        content = create_in_memory_xlsx(self.headers, rows)
+        result = parse_excel_in_memory(content, default_unit_behavior="reject")
+        self.assertTrue(result["success"])
+        
+        self.assertEqual(result["quality_metrics"]["nao_classificados_count"], 1)
+        self.assertEqual(result["quality_metrics"]["conflito_count"], 1)
+        
+        # Carlos Almeida must not be classified as ATIVO or DESLIGADO
+        record = result["raw_valid_records"][0]
+        self.assertEqual(record["categoria"], "NÃO CLASSIFICADO")
+        
+        # Check warning exists
+        self.assertTrue(any("divergentes" in i["erro"] for i in result["inconsistencies"]))
+
+    def test_inss_precedence_and_validation(self):
+        # Active with INSS SIM -> INSS
+        # Active with INSS NÃO -> ATIVO
+        # Active with INSS ausente/NÃO INFORMADO (and no other INSS status) -> NÃO CLASSIFICADO
+        # Desligado with INSS SIM -> DESLIGADO
+        rows = [
+            ["Ana Silva", "Analista", "01/07/2026", "M54", "2 dias", "Sim", "Ativo"], # INSS
+            ["Carlos Souza", "Gerente", "02/07/2026", "J11", "4 horas", "Não", "Ativo"], # ATIVO
+            ["Bruno Alves", "Suporte", "03/07/2026", "F43", "1 dia", "", "Ativo"], # NÃO CLASSIFICADO (no info)
+            ["Daniel Santos", "Dev", "04/07/2026", "Z00", "1 dia", "Sim", "Desligado"] # DESLIGADO
+        ]
+        content = create_in_memory_xlsx(self.headers, rows)
+        result = parse_excel_in_memory(content, default_unit_behavior="reject")
+        self.assertTrue(result["success"])
+        
+        self.assertEqual(result["quality_metrics"]["ativos_count"], 1) # Carlos
+        self.assertEqual(result["quality_metrics"]["inss_count"], 1) # Ana
+        self.assertEqual(result["quality_metrics"]["desligados_count"], 1) # Daniel
+        self.assertEqual(result["quality_metrics"]["inss_ausente_ativo_count"], 1) # Bruno
+        self.assertEqual(result["quality_metrics"]["nao_classificados_count"], 1) # Bruno
+
+    def test_compatibility_various_column_sizes(self):
+        # 5 columns (old sheet)
+        headers5 = ["Nome do colaborador", "Função do colaborador", "Data inicial do atestado", "CID", "Quantidade de dias/ HORAS"]
+        rows5 = [
+            ["Ana Silva", "Analista", "01/07/2026", "M54.5", "2 dias"]
+        ]
+        content5 = create_in_memory_xlsx(headers5, rows5)
+        result5 = parse_excel_in_memory(content5, default_unit_behavior="reject")
+        self.assertTrue(result5["success"])
+        self.assertFalse(result5["situacao_available"])
+        self.assertFalse(result5["inss_available"])
+        
+        # 6 columns (INSS but no situation)
+        headers6 = ["Nome do colaborador", "Função do colaborador", "Data inicial do atestado", "CID", "Quantidade de dias/ HORAS", "Houve Afastamento Pelo INSS?"]
+        rows6 = [
+            ["Ana Silva", "Analista", "01/07/2026", "M54.5", "2 dias", "Não"]
+        ]
+        content6 = create_in_memory_xlsx(headers6, rows6)
+        result6 = parse_excel_in_memory(content6, default_unit_behavior="reject")
+        self.assertTrue(result6["success"])
+        self.assertFalse(result6["situacao_available"])
+        self.assertTrue(result6["inss_available"])
+

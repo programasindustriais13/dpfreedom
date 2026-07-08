@@ -98,24 +98,38 @@ têm acesso automático ao dashboard. Siga os passos abaixo para configurar:
 8. (Opcional) Crie outro usuário comum sem o grupo para testar o bloqueio.
 
 ------------------------------------------------------------------------
-10. ESTRUTURA DA PLANILHA E NOVA COLUNA INSS
 ------------------------------------------------------------------------
-O sistema aceita planilhas no formato .xlsx contendo 5 ou 6 colunas. A estrutura esperada é:
+10. ESTRUTURA DA PLANILHA E NOVAS COLUNAS (INSS E ATIVO/DESLIGADO)
+------------------------------------------------------------------------
+O sistema aceita planilhas no formato .xlsx contendo 5, 6 ou 7 colunas. A estrutura esperada é:
 1. **Nome do colaborador** (Obrigatória)
 2. **Função do colaborador** (Opcional - se vazia, classificada como "Não informada")
 3. **Data inicial do atestado** (Obrigatória - formato DD/MM/AAAA ou AAAA-MM-DD)
 4. **CID** (Opcional - exibida apenas agregada nos gráficos)
 5. **Quantidade de dias/ HORAS** (Obrigatória - ex: "2 dias", "4 horas", "8h", "08:00")
 6. **Houve Afastamento Pelo INSS?** (Opcional - coluna nova)
+7. **Ativo/Desligado** (Opcional - coluna nova)
 
 ### Valores aceitos para o INSS:
 * **Como SIM**: "SIM", "Sim", "sim", "s" (e variações com espaços extras).
 * **Como NÃO**: "NÃO", "Não", "não", "NAO", "Nao", "nao", "n" (e variações com espaços extras).
 * **Como NÃO INFORMADO**: Células em branco ou vazias.
-* **Valores inválidos**: Valores como "talvez" ou "não sei" serão apresentados na área de "Inconsistências Detectadas" na qualidade dos dados, mas a linha continuará sendo processada normalmente, sendo classificada como "NÃO INFORMADO" no painel.
+* **Valores inválidos**: Apresentados na área de "Inconsistências Detectadas". A linha é classificada como "NÃO INFORMADO" no painel.
+
+### Valores aceitos para a Situação Cadastral (Ativo/Desligado):
+* **Como ATIVO**: "ATIVO", "Ativo", "ativo", "ATIVA", "Ativa", "ativa" (e variações com espaços extras).
+* **Como DESLIGADO**: "DESLIGADO", "Desligado", "desligado", "DESLIGADA", "Desligada", "desligada" (e variações com espaços extras).
+* **Como NÃO CLASSIFICADO (e aviso de inconsistência)**: Células vazias ou com valores inválidos (como "férias", "afastado").
+
+### Regras de Classificação e Exclusividade:
+Os colaboradores são agrupados pelo nome e classificados em apenas uma categoria exclusiva:
+1. **Desligado**: Colaborador que possui pelo menos uma linha marcada como "Desligado" (maior precedência).
+2. **INSS**: Colaborador ativo que tem histórico de atestado pelo INSS ("Sim" na coluna INSS).
+3. **Ativo**: Colaborador ativo sem histórico de atestados pelo INSS.
+4. **Não Classificado**: Casos de conflito (linhas ativas e desligadas para a mesma pessoa) ou com situação não informada/inválida. Esses colaboradores são listados nos painéis de qualidade de dados, mas não aparecem nas abas Ativos, INSS ou Desligados.
 
 ### Compatibilidade com Planilhas Antigas:
-Se a planilha não contiver a coluna do INSS, o sistema processará normalmente as 5 colunas existentes. Apresentará um aviso informando que a coluna do INSS não está disponível, exibirá "Não disponível" no indicador do INSS e ocultará o filtro e o gráfico correspondente, sem quebras no processamento.
+Se a planilha contiver apenas 5 ou 6 colunas, o sistema processará normalmente. Exibirá avisos de ausência no topo e colocará todos os colaboradores na categoria NÃO CLASSIFICADO, mantendo a visualização e todos os gráficos de forma funcional, sem quebrar o processamento.
 
 ------------------------------------------------------------------------
 11. CARD INTELIGENTE DE TEMPO DE AFASTAMENTO
@@ -145,13 +159,13 @@ O servidor estará rodando em: http://127.0.0.1:8700/
    Você será redirecionado para a tela de Acesso Negado (403) com a identidade do Departamento Pessoal.
 2. Clique em "Alternar Usuário" e faça login com o usuário do Departamento Pessoal (ex: 'ana_dp').
 3. Você será direcionado para o Dashboard Principal do Departamento Pessoal.
-4. Anexe a planilha de testes antiga (apenas 5 colunas). Veja que o aviso de ausência da coluna do INSS é exibido, o indicador mostra "Não disponível", e o filtro/gráfico correspondente ficam desabilitados ou ocultos.
-5. Faça o upload de uma planilha com 6 colunas, contendo valores Sim, Não, vazios e inválidos na coluna do INSS.
-6. Confira a contagem de afastados e o percentual calculated (apenas sobre Sim + Não).
-7. Teste o filtro interativo por INSS ("Sim", "Não", "Não informado", "Todos"). Verifique que todos os cartões, a tabela consolidada e os gráficos são atualizados em tempo real.
-8. No card de tempo de afastamento, identifique colaboradores com lançamentos híbridos e valide a exibição (ex: "2 dias e 4 horas"). Alterne entre os modos "Combinado", "Dias" e "Horas" e mude a ordenação.
-9. Na tabela de resumo por colaborador, verifique as novas colunas de quantidade com afastamento INSS, sem afastamento, e sem informação.
-10. Atualize a página (F5) e confirme que todos os dados somem da tela. Os dados não foram persistidos em local algum (banco, disco ou sessão).
+4. Faça o upload de uma planilha com 7 colunas, contendo a coluna "Ativo/Desligado".
+5. Navegue pelas novas abas principais ("Colaboradores Ativos" e "Situações Especiais") e sub-abas ("Afastados pelo INSS" e "Colaboradores Desligados"). Note que a contagem de funcionários é exibida nos botões.
+6. Teste os filtros de data, colaborador, função e CID em cada aba. Verifique que eles atuam de forma isolada (um filtro selecionado em Ativos não afeta o dashboard de Desligados).
+7. Verifique o Card Inteligente em cada dashboard: ele funciona de forma independente, permitindo ordenar e alternar modos sem interferir nas outras abas.
+8. No final da página, analise o novo painel de "Diagnóstico de Qualidade e Classificação Cadastral", que apresenta o resumo global de classificação (Ativos, INSS, Desligados, Não Classificados), diagnóstico de pendências (Situação ausente, conflitos, INSS ausente para ativo) e status de cabeçalhos.
+9. Faça o upload de uma planilha antiga sem a coluna "Ativo/Desligado". Verifique que o aviso de ausência é exibido e todos os colaboradores são classificados na categoria "NÃO CLASSIFICADO", mantendo a compatibilidade.
+10. Atualize a página (F5) e confirme que todos os dados somem da tela. Os dados não foram persistidos em local algum (banco, disco, cookies ou sessão).
 11. Faça o logout clicando em "Sair".
 
 ------------------------------------------------------------------------
@@ -190,4 +204,6 @@ utilize os seguintes comandos no terminal:
 
 4. Criar o commit registrando a funcionalidade:
    git commit -m "feat: implementar melhorias dp inss card tempo e identidade visual"
+
+   git push
 ========================================================================
