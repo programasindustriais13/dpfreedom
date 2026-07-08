@@ -1,3 +1,4 @@
+from pathlib import Path
 from django import forms
 from django.core.exceptions import ValidationError
 
@@ -10,7 +11,7 @@ class ExcelUploadForm(forms.Form):
 
     excel_file = forms.FileField(
         label="Planilha de Atestados (.xlsx)",
-        help_text="Selecione um arquivo de planilha no formato .xlsx.",
+        help_text="Selecione um arquivo Excel no formato .xlsx. A extensão pode estar escrita em letras maiúsculas ou minúsculas.",
         required=True
     )
     
@@ -24,9 +25,10 @@ class ExcelUploadForm(forms.Form):
     def clean_excel_file(self):
         uploaded_file = self.cleaned_data.get('excel_file')
         if uploaded_file:
-            # Validate extension
+            # Validate extension case-insensitively
             name = uploaded_file.name
-            if not name.endswith('.xlsx'):
+            extension = Path(name).suffix.lower()
+            if extension != '.xlsx':
                 raise ValidationError("Extensão de arquivo inválida. Apenas arquivos .xlsx são suportados.")
             
             # Validate file size (limit to 5MB)

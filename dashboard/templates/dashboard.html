@@ -72,7 +72,7 @@
                     <i class="fa-regular fa-file-excel"></i>
                 </div>
                 <div class="upload-text" id="upload-filename">Clique aqui para selecionar a planilha</div>
-                <div class="upload-subtext">Apenas formato .xlsx. Tamanho máximo: 5 MB. Limite de 1000 linhas.</div>
+                <div class="upload-subtext">Selecione um arquivo Excel no formato .xlsx. A extensão pode estar escrita em letras maiúsculas ou minúsculas. Tamanho máximo: 5 MB. Limite de 1000 linhas.</div>
                 <input type="file" name="excel_file" id="id_excel_file" style="display: none;" accept=".xlsx" required onchange="updateFileName(this)">
             </div>
             {% if form.excel_file.errors %}

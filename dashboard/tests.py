@@ -235,3 +235,67 @@ class PrivacyAndCacheTests(TestCase):
         dashboard_app = apps.get_app_config('dashboard')
         models = list(dashboard_app.get_models())
         self.assertEqual(len(models), 0)
+
+
+class FileExtensionValidationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.dp_user = User.objects.create_user(username='dp_user', password='password123')
+        self.dp_group, _ = Group.objects.get_or_create(name='Departamento Pessoal')
+        self.dp_user.groups.add(self.dp_group)
+        self.client.login(username='dp_user', password='password123')
+        self.dashboard_url = reverse('dashboard')
+
+        # Create valid xlsx content
+        self.headers = ["Nome do colaborador", "Função do colaborador", "Data inicial do atestado", "CID", "Quantidade de dias/ HORAS"]
+        self.rows = [
+            ["Ana Silva", "Analista", "01/07/2026", "M54.5", "2 dias"],
+        ]
+        self.valid_xlsx_content = create_in_memory_xlsx(self.headers, self.rows)
+
+    def test_form_accepts_various_xlsx_casings(self):
+        """Verify that the form accepts .xlsx, .XLSX, .Xlsx, and .xLsX."""
+        from .forms import ExcelUploadForm
+        casings = ["atestados.xlsx", "ATESTADOS.XLSX", "Atestados.Xlsx", "atestados.xLsX"]
+        for filename in casings:
+            uploaded_file = SimpleUploadedFile(filename, self.valid_xlsx_content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            form = ExcelUploadForm(data={'default_unit_behavior': 'reject'}, files={'excel_file': uploaded_file})
+            self.assertTrue(form.is_valid(), f"Form should be valid for extension casing of filename: {filename}")
+
+    def test_form_rejects_other_formats(self):
+        """Verify that the form rejects .xls, .xlsm, .csv, and other extensions."""
+        from .forms import ExcelUploadForm
+        invalid_extensions = ["atestados.xls", "atestados.xlsm", "atestados.csv", "atestados.txt", "atestados.pdf"]
+        for filename in invalid_extensions:
+            uploaded_file = SimpleUploadedFile(filename, self.valid_xlsx_content)
+            form = ExcelUploadForm(data={'default_unit_behavior': 'reject'}, files={'excel_file': uploaded_file})
+            self.assertFalse(form.is_valid(), f"Form should be invalid for filename: {filename}")
+            self.assertIn("excel_file", form.errors)
+            self.assertIn("Extensão de arquivo inválida", form.errors["excel_file"][0])
+
+    def test_corrupted_xlsx_caps_rejected_by_view(self):
+        """Verify that a corrupted file named ATESTADOS.XLSX is rejected by the parsing service in the view."""
+        corrupted_content = b"this is corrupted zip/xlsx content"
+        uploaded_file = SimpleUploadedFile("ATESTADOS.XLSX", corrupted_content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        response = self.client.post(self.dashboard_url, {
+            'default_unit_behavior': 'reject',
+            'excel_file': uploaded_file
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Arquivo corrompido ou formato inválido")
+        self.assertIsNone(response.context.get('parsed_data'))
+
+    def test_valid_xlsx_caps_accepted_by_view(self):
+        """Verify that a valid file named ATESTADOS.XLSX is successfully accepted and parsed by the view."""
+        uploaded_file = SimpleUploadedFile("ATESTADOS.XLSX", self.valid_xlsx_content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        response = self.client.post(self.dashboard_url, {
+            'default_unit_behavior': 'reject',
+            'excel_file': uploaded_file
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Planilha processada")
+        self.assertIsNotNone(response.context.get('parsed_data'))
+        self.assertEqual(response.context['parsed_data']['valid_count'], 1)
+
