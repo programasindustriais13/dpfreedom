@@ -28,7 +28,7 @@ python -m venv .venv
 Para ativar o ambiente virtual no PowerShell do Windows, execute:
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 .\.venv\Scripts\Activate.ps1
-
+python manage.py runserver 
 Uma vez ativo, o prefixo (.venv) aparecerá no início da linha de comando.
 
 ------------------------------------------------------------------------
@@ -71,14 +71,27 @@ python manage.py createsuperuser
 Siga as instruções na tela e forneça um nome de usuário, e-mail e senha.
 
 ------------------------------------------------------------------------
-8. ARQUIVOS ESTÁTICOS E LOCALIZAÇÃO DA LOGO
+8. ARQUIVOS ESTÁTICOS, COLLECTSTATIC E DEPLOYMENT
 ------------------------------------------------------------------------
-O logotipo da empresa foi copiado da raiz para a pasta estática:
-* Origem: 'Untitled-2.png'
-* Destino: 'dashboard/static/images/logo.png'
+O projeto utiliza WhiteNoise para servimento eficiente de arquivos estáticos.
 
-Para coletar e preparar os arquivos estáticos (caso utilize em ambiente de produção):
-python manage.py collectstatic --noinput
+Passos obrigatórios após instalar dependências (`pip install -r requirements.txt`):
+
+1. Executar a coleta de arquivos estáticos:
+   python manage.py collectstatic --noinput
+
+2. Pasta gerada:
+   'staticfiles/' na raiz do projeto. Todos os estáticos dos aplicativos e do
+   Django Admin serão reunidos nesta pasta.
+
+3. Versionamento Git:
+   A pasta 'staticfiles/' é um artefato gerado no servidor e NÃO deve ser enviada
+   ao Git (já devidamente configurada no .gitignore).
+
+4. Reiniciar o servidor:
+   Sempre que alterar arquivos CSS, JS ou imagens, execute 'collectstatic --noinput'
+   e reinicie o processo do servidor de aplicação (ex: encerrar e iniciar o 'runserver'
+   ou serviço de execução no Windows).
 
 ------------------------------------------------------------------------
 9. CRIAÇÃO DO GRUPO E USUÁRIOS OPERACIONAIS
